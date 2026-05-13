@@ -68,6 +68,12 @@ pub enum Commands {
         #[command(subcommand)]
         action: ContextAction,
     },
+    Init {
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+        #[arg(long)]
+        dry_run: bool,
+    },
     Daemon {
         #[command(subcommand)]
         action: DaemonAction,
@@ -377,6 +383,9 @@ pub fn run_with_io(
             error,
         ),
         Commands::Context { action } => commands::context::run(action, output),
+        Commands::Init { project, dry_run } => {
+            commands::init::run(commands::init::InitConfig { project, dry_run }, output)
+        }
         Commands::Daemon { action } => commands::daemon::run(action),
         Commands::Policy { action } => commands::policy::run(action, output),
         Commands::Task { action } => commands::task::run(action, output),

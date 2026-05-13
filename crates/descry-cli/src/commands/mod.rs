@@ -5,6 +5,7 @@ pub mod demo;
 pub mod doctor;
 pub mod evaluate;
 pub mod hook;
+pub mod init;
 pub mod logs;
 pub mod policy;
 pub mod policy_source;
