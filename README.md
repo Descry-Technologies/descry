@@ -35,11 +35,11 @@ Current capabilities:
 - Scoped TTL approvals
 - Hash-chained local audit log verification
 - Hook installation and doctor checks
-- Reproducible launch demos: `pocketos`, `rm-rf`, `secret-access`, `off-task-edit`, `mcp-poison`, `prod-delete`
+- Minimal project initialization with `.descry/project.yml`, state, memory, and index generation
+- Reproducible launch demos: `in-task-edit`, `off-task-edit`, `secret-access`, `rm-rf`, `mcp-poison`, `prod-delete`, `pocketos`
 
 Not complete yet:
 
-- `descry init`
 - packaged installer / Homebrew tap
 - staged secret scanning
 - SQL-aware `DELETE FROM ...` without `WHERE`
@@ -94,6 +94,7 @@ The defaults are intentionally conservative. Descry should block things that are
 Implemented:
 
 ```bash
+descry demo in-task-edit
 descry demo pocketos
 descry demo rm-rf
 descry demo secret-access

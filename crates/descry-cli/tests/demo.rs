@@ -3,6 +3,7 @@ use descry_cli::{run_with_io, Cli, Commands, DemoAction};
 #[test]
 fn launch_demos_print_required_trace_fields() {
     let cases = [
+        (demo_in_task_edit(), "in-task-edit", "allow"),
         (demo_pocketos(), "pocketos", "block"),
         (demo_rm_rf(), "rm-rf", "block"),
         (demo_secret_access(), "secret-access", "block"),
@@ -39,6 +40,14 @@ fn launch_demos_print_required_trace_fields() {
 }
 
 #[test]
+fn demo_in_task_edit_allows_matching_source_change() {
+    let output = run_demo(demo_in_task_edit());
+
+    assert!(output.contains("asset match: source"));
+    assert!(output.contains("allowed: src/auth/session.ts matches inferred task context"));
+}
+
+#[test]
 fn demo_secret_access_uses_asset_policy_block() {
     let output = run_demo(demo_secret_access());
 
@@ -66,6 +75,12 @@ fn run_demo(action: DemoAction) -> String {
 
     assert!(error.is_empty());
     String::from_utf8(output).expect("stdout is utf8")
+}
+
+fn demo_in_task_edit() -> DemoAction {
+    DemoAction::InTaskEdit {
+        policy: policy_path(),
+    }
 }
 
 fn demo_pocketos() -> DemoAction {

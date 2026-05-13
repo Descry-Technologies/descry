@@ -199,6 +199,10 @@ pub enum LogsAction {
 
 #[derive(Debug, Subcommand)]
 pub enum DemoAction {
+    InTaskEdit {
+        #[arg(long, default_value = "policies/safe-defaults.yml")]
+        policy: PathBuf,
+    },
     Pocketos {
         #[arg(long, default_value = "policies/safe-defaults.yml")]
         policy: PathBuf,

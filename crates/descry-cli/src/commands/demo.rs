@@ -11,6 +11,7 @@ use crate::{CliError, DemoAction, Result};
 
 pub fn run(action: DemoAction, output: &mut dyn Write) -> Result<()> {
     match action {
+        DemoAction::InTaskEdit { policy } => run_trace(in_task_edit_demo(policy), output),
         DemoAction::Pocketos { policy } => run_trace(pocketos_demo(policy), output),
         DemoAction::RmRf { policy } => run_trace(rm_rf_demo(policy), output),
         DemoAction::SecretAccess { policy } => run_trace(secret_access_demo(policy), output),
@@ -68,6 +69,29 @@ fn run_trace(trace: DemoTrace, output: &mut dyn Write) -> Result<()> {
             ),
             1,
         ))
+    }
+}
+
+fn in_task_edit_demo(policy: PathBuf) -> DemoTrace {
+    DemoTrace {
+        name: "in-task-edit",
+        policy,
+        prompt_context: "fix login session expiry while editing the session module",
+        acp: acp(AcpSpec {
+            actor: "claude-code",
+            action_type: "file.write",
+            verb: "modify",
+            target: "src/auth/session.ts",
+            active_task: None,
+            branch: "fix/session-expiry",
+            recent_files: vec!["src/auth/session.ts", "tests/auth/session.test.ts"],
+            asset_type: "code_file",
+            sensitivity: "normal",
+            environment: "local",
+            diff_summary: Some(String::from("demo file content omitted")),
+        }),
+        without_descry: "the edit proceeds, but there is no independent task/asset check",
+        expected_decision: Decision::Allow,
     }
 }
 
