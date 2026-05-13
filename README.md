@@ -6,7 +6,7 @@
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
 [![Status](https://img.shields.io/badge/status-alpha-yellow.svg)](#status)
 
-Descry Guard is a local, open-source action firewall for AI coding agents. It sits between tools like Claude Code, Cursor, and Codex and the actions they are about to take, then blocks known-catastrophic operations before they execute.
+Descry Guard is a local, open-source action firewall for AI coding agents. It installs into Claude Code, Cursor, and Codex, infers task context from the session and repository, and blocks dangerous or off-context actions before execution.
 
 The open-source repository contains the local engine, policy packs, adapters, CLI, demos, and hash-chained audit primitives. The future commercial platform is separate: team policy sync, cloud audit retention, SSO, SIEM export, and managed detection feeds.
 
@@ -55,25 +55,37 @@ Prerequisites:
 ```bash
 git clone https://github.com/descry-dev/descry.git
 cd descry
-cargo test --workspace
-cargo run -p descry-cli -- demo pocketos
+cargo install --path crates/descry-cli
+descry init --dry-run
+descry demo in-task-edit
+descry demo off-task-edit
 ```
 
 Expected demo shape:
 
 ```text
-WITH DESCRY                                      | WITHOUT DESCRY
--------------------------------------------------+---------------------------------------------
-task: fix staging 401                            | same task: fix staging 401
-agent finds Railway token                        | agent finds Railway token
-action: curl DELETE api.railway.app volume       | action: curl DELETE api.railway.app volume
-BLOCKED before execution                         | request is sent
-production volume remains green                  | production volume deleted
-backups remain intact                            | backups on same volume vanish
-
-decision: block
-reason: destructive hosted control-plane operation (rule: control-plane-delete)
+descry demo off-task-edit
+loaded policies/safe-defaults.yml
+prompt/context: fix login session expiry while agent edits deployment workflow
+inferred task: fix/session-expiry
+proposed action: .github/workflows/deploy.yml
+classified action: FileWrite
+asset match: infra sensitivity=high default_action=require_approval
+decision: require_approval
+reason: high write target .github/workflows/deploy.yml requires scoped approval (asset: infra)
+without Descry: deployment workflow changes without an explicit approval checkpoint
 ```
+
+For a real checkout, run `descry init` from the project root. It creates `.descry/project.yml`, `.descry/state/`, `.descry/memory/`, and `.descry/state/project-index.json`.
+
+## Supported Agents
+
+Descry currently ships hook installers and hook entrypoints for:
+
+- Claude Code: `descry hook install claude`
+- Codex: `descry hook install codex`
+- Cursor shell execution: `descry hook install cursor`
+- Cursor MCP calls: `descry hook cursor before-mcp-execution`
 
 ## What It Blocks Today
 
@@ -89,6 +101,16 @@ The bundled `policies/safe-defaults.yml` policy currently blocks:
 
 The defaults are intentionally conservative. Descry should block things that are obviously unsafe before it expands into broader ask/approve behavior.
 
+## Context Inference
+
+Descry does not require users to manually set a task for normal operation. Hook calls and demos build an inferred task envelope from branch names, recent files, harness context, project index data, and static asset rules. The engine then combines that task with the classified action and asset match.
+
+Examples:
+
+- `src/auth/session.ts` on branch `fix/session-expiry` maps to normal source work and can be allowed.
+- `.github/workflows/deploy.yml` during that same task maps to high-sensitivity infra and requires approval.
+- `.env.production` maps to critical secrets and is blocked.
+
 ## CLI Surface
 
 Implemented:
@@ -101,6 +123,10 @@ descry demo secret-access
 descry demo off-task-edit
 descry demo mcp-poison
 descry demo prod-delete
+descry init
+descry init --dry-run
+descry context build
+descry context show
 descry hook install claude
 descry hook install codex
 descry hook install cursor
@@ -128,8 +154,9 @@ descry hook cursor before-mcp-execution
 agent hook payload
   -> adapter normalizer
   -> Action Context Packet
-  -> local policy evaluation
-  -> approval layer
+  -> project/context/task inference
+  -> action classifier
+  -> shared local evaluation engine
   -> allow / ask / require_approval / block
   -> hash-chained audit record
 ```
@@ -141,6 +168,7 @@ crates/descry-core      ACP, decisions, risk types
 crates/descry-policy    policy loader and matchers
 crates/descry-adapters  Claude, Codex, Cursor normalization
 crates/descry-cli       CLI, hooks, approvals, demos
+crates/descry-context   project index and bounded session history
 crates/descry-audit     tamper-evident JSONL audit chain
 crates/descry-memory    approvals, asset policy, behavior counters
 crates/descry-daemon    local HTTP route skeleton
@@ -153,6 +181,22 @@ fixtures/               policy regression fixtures
 Descry Guard runs with normal user privileges. It provides detection, friction, and auditability. It is not a kernel sandbox, and a hostile process running as the same user can disable it.
 
 This boundary is intentional. The product goal is to prevent agent mistakes and policy violations in normal developer workflows, not to contain malware on a compromised machine.
+
+## Local Privacy
+
+Descry stores local policy, state, approvals, behavior counters, and audit logs under `.descry/` by default. Session history stores sanitized targets, action types, decisions, and prompt text when a harness exposes it; MCP argument values and sensitive file contents are not recorded.
+
+No cloud service is required for the open-source engine. Future commercial sync, SSO, and managed retention features are outside this local trust boundary.
+
+## Audit Verification
+
+Decisions can be written as a hash-chained JSONL audit log. Verify an audit log with:
+
+```bash
+descry logs verify --path .descry/audit.log
+```
+
+The verifier reports whether the chain is intact or where tampering is detected.
 
 ## Open Source Commitment
 
