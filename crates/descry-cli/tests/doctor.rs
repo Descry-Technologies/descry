@@ -20,6 +20,11 @@ fn doctor_passes_with_policy_hook_and_missing_audit() {
     assert_eq!(exit_code, 0);
     let json: Value = serde_json::from_slice(&output).expect("stdout is json");
     assert_eq!(json["ok"], true);
+    assert!(json["checks"]
+        .as_array()
+        .expect("checks is array")
+        .iter()
+        .any(|check| check["id"] == "demo.off_task_edit" && check["ok"] == true));
 }
 
 #[test]

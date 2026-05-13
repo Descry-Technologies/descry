@@ -12,7 +12,7 @@ use crate::commands::hook::{
     project_codex_hooks_path, project_cursor_hooks_path,
 };
 use crate::commands::policy_source::load_policy;
-use crate::{CliError, Result};
+use crate::{CliError, DemoAction, Result};
 
 const CLAUDE_HOOK_COMMAND: &str = "descry hook claude pretooluse";
 const CODEX_HOOK_COMMAND: &str = "descry hook codex pretooluse";
@@ -75,6 +75,7 @@ pub fn run(config: DoctorConfig, output: &mut dyn Write) -> Result<()> {
         check_cursor_mcp_hook(&cursor_hooks_path),
         check_audit(&config.audit, &config.repo_id_hash),
     ]);
+    checks.extend(check_launch_demos(&config.policy));
     let ok = checks.iter().all(|check| check.ok);
     let checks_json: Vec<Value> = checks
         .into_iter()
@@ -299,6 +300,72 @@ fn check_audit(audit_path: &Path, repo_id_hash: &str) -> DoctorCheck {
             id: "audit.verify",
             ok: false,
             detail: format!("broken at seq {at_seq}: {reason}"),
+        },
+    }
+}
+
+fn check_launch_demos(policy_path: &Path) -> Vec<DoctorCheck> {
+    [
+        (
+            "demo.in_task_edit",
+            DemoAction::InTaskEdit {
+                policy: policy_path.to_path_buf(),
+            },
+        ),
+        (
+            "demo.off_task_edit",
+            DemoAction::OffTaskEdit {
+                policy: policy_path.to_path_buf(),
+            },
+        ),
+        (
+            "demo.secret_access",
+            DemoAction::SecretAccess {
+                policy: policy_path.to_path_buf(),
+            },
+        ),
+        (
+            "demo.rm_rf",
+            DemoAction::RmRf {
+                policy: policy_path.to_path_buf(),
+            },
+        ),
+        (
+            "demo.mcp_poison",
+            DemoAction::McpPoison {
+                policy: policy_path.to_path_buf(),
+            },
+        ),
+        (
+            "demo.prod_delete",
+            DemoAction::ProdDelete {
+                policy: policy_path.to_path_buf(),
+            },
+        ),
+        (
+            "demo.pocketos",
+            DemoAction::Pocketos {
+                policy: policy_path.to_path_buf(),
+            },
+        ),
+    ]
+    .into_iter()
+    .map(|(id, action)| check_launch_demo(id, action))
+    .collect()
+}
+
+fn check_launch_demo(id: &'static str, action: DemoAction) -> DoctorCheck {
+    let mut output = Vec::new();
+    match crate::commands::demo::run(action, &mut output) {
+        Ok(()) => DoctorCheck {
+            id,
+            ok: true,
+            detail: String::from("demo passed"),
+        },
+        Err(error) => DoctorCheck {
+            id,
+            ok: false,
+            detail: error.to_string(),
         },
     }
 }
