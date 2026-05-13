@@ -178,12 +178,27 @@ fn apply_approval_layer(
     if decision.decision == Decision::Block && acp.action.action_type == "mcp.call" {
         return apply_mcp_approval_override(decision, acp, runtime.approvals_path);
     }
-    if decision.decision == Decision::Block || acp.action.action_type != "file.write" {
+    if decision.decision == Decision::Block {
         return decision;
     }
     let Some(asset) = input.asset.as_ref() else {
         return decision;
     };
+    if asset.default_action == "block" && acp.action.action_type == "file.read" {
+        return DecisionOutput {
+            decision: Decision::Block,
+            risk_score: RiskScore::try_from(95).expect("95 is a valid risk score"),
+            confidence: Confidence::try_from(0.95).expect("0.95 is a valid confidence"),
+            reason: format!(
+                "{} read target {} is blocked by asset policy (asset: {})",
+                asset.sensitivity, acp.action.target, asset.id
+            ),
+            conditions: Vec::new(),
+        };
+    }
+    if acp.action.action_type != "file.write" {
+        return decision;
+    }
     if acp.intent.active_task.is_some() {
         return decision;
     }

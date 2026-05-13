@@ -203,6 +203,26 @@ pub enum DemoAction {
         #[arg(long, default_value = "policies/safe-defaults.yml")]
         policy: PathBuf,
     },
+    RmRf {
+        #[arg(long, default_value = "policies/safe-defaults.yml")]
+        policy: PathBuf,
+    },
+    SecretAccess {
+        #[arg(long, default_value = "policies/safe-defaults.yml")]
+        policy: PathBuf,
+    },
+    OffTaskEdit {
+        #[arg(long, default_value = "policies/safe-defaults.yml")]
+        policy: PathBuf,
+    },
+    McpPoison {
+        #[arg(long, default_value = "policies/safe-defaults.yml")]
+        policy: PathBuf,
+    },
+    ProdDelete {
+        #[arg(long, default_value = "policies/safe-defaults.yml")]
+        policy: PathBuf,
+    },
 }
 
 #[derive(Debug, Subcommand)]

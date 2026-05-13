@@ -35,7 +35,7 @@ Current capabilities:
 - Scoped TTL approvals
 - Hash-chained local audit log verification
 - Hook installation and doctor checks
-- Reproducible PocketOS-style demo: `descry demo pocketos`
+- Reproducible launch demos: `pocketos`, `rm-rf`, `secret-access`, `off-task-edit`, `mcp-poison`, `prod-delete`
 
 Not complete yet:
 
@@ -43,8 +43,6 @@ Not complete yet:
 - packaged installer / Homebrew tap
 - staged secret scanning
 - SQL-aware `DELETE FROM ...` without `WHERE`
-- `descry demo rm-rf`
-- `descry demo mcp-poison`
 - polished release artifacts
 
 ## Quickstart From Source
@@ -97,6 +95,11 @@ Implemented:
 
 ```bash
 descry demo pocketos
+descry demo rm-rf
+descry demo secret-access
+descry demo off-task-edit
+descry demo mcp-poison
+descry demo prod-delete
 descry hook install claude
 descry hook install codex
 descry hook install cursor
