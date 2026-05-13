@@ -285,6 +285,59 @@ fn claude_pretooluse_uses_project_defaults_for_secret_write() {
     );
 }
 
+#[test]
+fn claude_pretooluse_enriches_context_from_project_index() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    let audit = tempdir.path().join("audit.log");
+    let state = tempdir.path().join("state");
+    descry_context::write_project_index(
+        &descry_context::ProjectIndex {
+            repo_root: tempdir.path().to_path_buf(),
+            repo_name: String::from("descry"),
+            branch: Some(String::from("fix/session-expiry")),
+            languages: vec![String::from("typescript")],
+            frameworks: Vec::new(),
+            source_paths: vec![String::from("src/**")],
+            test_paths: Vec::new(),
+            infra_paths: Vec::new(),
+            config_paths: Vec::new(),
+            secret_paths: Vec::new(),
+            deploy_paths: Vec::new(),
+        },
+        &state.join("project-index.json"),
+    )
+    .expect("project index writes");
+    let mut input = claude_write_payload("src/auth/expiry.ts");
+    let mut output = Vec::new();
+    let mut error = Vec::new();
+
+    run_with_io(
+        cli_full(
+            &audit,
+            &tempdir.path().join("approvals.jsonl"),
+            &tempdir.path().join("missing-legacy-asset-policy.yml"),
+            &tempdir.path().join("behavior.json"),
+        ),
+        &mut input,
+        &mut output,
+        &mut error,
+    )
+    .expect("hook succeeds");
+
+    assert!(error.is_empty());
+    let output_json: Value = serde_json::from_slice(&output).expect("stdout is json");
+    assert_eq!(
+        output_json["hookSpecificOutput"]["permissionDecision"],
+        "allow"
+    );
+    assert!(
+        output_json["hookSpecificOutput"]["permissionDecisionReason"]
+            .as_str()
+            .expect("reason is string")
+            .contains("fix/session-expiry")
+    );
+}
+
 fn cli(audit: &std::path::Path) -> Cli {
     cli_with_approvals(
         audit,

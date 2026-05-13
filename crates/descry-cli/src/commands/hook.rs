@@ -343,6 +343,7 @@ fn evaluate_and_record(
     mut acp: ActionContextPacket,
     runtime: HookRuntimeConfig,
 ) -> Result<DecisionOutput> {
+    enrich_acp_context(&mut acp, &runtime.state)?;
     acp.intent.active_task = crate::commands::task::read_active_task(&runtime.context)?;
     let policy = crate::commands::policy_source::load_policy(&runtime.policy)?.policy;
     let project_config = crate::commands::evaluate::load_project_policy(&runtime.project)?;
@@ -366,6 +367,37 @@ fn evaluate_and_record(
     )?;
     record_behavior(&runtime.behavior, &acp)?;
     Ok(decision)
+}
+
+fn enrich_acp_context(acp: &mut ActionContextPacket, state_dir: &Path) -> Result<()> {
+    if let Ok(index) = descry_context::read_project_index(&state_dir.join("project-index.json")) {
+        if acp.context.branch == "unknown" || acp.context.branch.trim().is_empty() {
+            if let Some(branch) = index.branch {
+                acp.context.branch = branch;
+            }
+        }
+        if acp.context.repo == "unknown" || acp.context.repo.trim().is_empty() {
+            acp.context.repo = index.repo_name;
+        }
+    }
+
+    if acp.context.recent_files.is_empty() {
+        let mut recent_files = descry_context::read_recent_events(state_dir)
+            .unwrap_or_default()
+            .into_iter()
+            .rev()
+            .filter(|event| event.action_type.starts_with("file."))
+            .map(|event| event.target)
+            .filter(|target| !target.trim().is_empty())
+            .take(20)
+            .collect::<Vec<_>>();
+        recent_files.reverse();
+        recent_files.sort();
+        recent_files.dedup();
+        acp.context.recent_files = recent_files;
+    }
+
+    Ok(())
 }
 
 fn record_behavior(behavior_path: &Path, acp: &ActionContextPacket) -> Result<()> {

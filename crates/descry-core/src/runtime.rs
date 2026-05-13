@@ -136,10 +136,6 @@ fn task_sources(acp: &ActionContextPacket) -> Vec<TaskSource> {
 
 fn likely_paths(acp: &ActionContextPacket) -> Vec<String> {
     let mut paths = acp.context.recent_files.clone();
-    let target = acp.action.target.as_str();
-    if acp.action.action_type.starts_with("file.") && !target.trim().is_empty() {
-        paths.push(target.to_string());
-    }
     paths.sort();
     paths.dedup();
     paths
@@ -153,9 +149,6 @@ fn likely_terms(acp: &ActionContextPacket) -> Vec<String> {
     terms.extend(split_terms(&acp.context.branch));
     for path in &acp.context.recent_files {
         terms.extend(path_terms(path));
-    }
-    if acp.action.action_type.starts_with("file.") {
-        terms.extend(path_terms(&acp.action.target));
     }
 
     terms.retain(|term| term.len() >= 3 && term != "unknown");
