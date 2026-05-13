@@ -59,7 +59,14 @@ pub fn run(config: DoctorConfig, output: &mut dyn Write) -> Result<()> {
             None => default_cursor_hooks_path()?,
         },
     };
-    let checks = vec![
+    let mut checks = Vec::new();
+    if let Some(project) = config.project.as_deref() {
+        checks.push(check_project_config(&project.join(".descry/project.yml")));
+        checks.push(check_project_index(
+            &project.join(".descry/state/project-index.json"),
+        ));
+    }
+    checks.extend([
         check_policy(&config.policy),
         check_claude_hook(&settings_path),
         check_codex_hook(&codex_hooks_path),
@@ -67,7 +74,7 @@ pub fn run(config: DoctorConfig, output: &mut dyn Write) -> Result<()> {
         check_cursor_shell_hook(&cursor_hooks_path),
         check_cursor_mcp_hook(&cursor_hooks_path),
         check_audit(&config.audit, &config.repo_id_hash),
-    ];
+    ]);
     let ok = checks.iter().all(|check| check.ok);
     let checks_json: Vec<Value> = checks
         .into_iter()
@@ -93,6 +100,41 @@ pub fn run(config: DoctorConfig, output: &mut dyn Write) -> Result<()> {
         Ok(())
     } else {
         Err(CliError::new("", 1))
+    }
+}
+
+fn check_project_config(project_config_path: &Path) -> DoctorCheck {
+    match crate::commands::evaluate::load_project_policy(project_config_path) {
+        Ok(_) if project_config_path.exists() => DoctorCheck {
+            id: "project.config",
+            ok: true,
+            detail: format!("loaded {}", project_config_path.display()),
+        },
+        Ok(_) => DoctorCheck {
+            id: "project.config",
+            ok: false,
+            detail: format!("missing {}", project_config_path.display()),
+        },
+        Err(error) => DoctorCheck {
+            id: "project.config",
+            ok: false,
+            detail: error.to_string(),
+        },
+    }
+}
+
+fn check_project_index(index_path: &Path) -> DoctorCheck {
+    match descry_context::read_project_index(index_path) {
+        Ok(index) => DoctorCheck {
+            id: "project.index",
+            ok: true,
+            detail: format!("loaded {} for {}", index_path.display(), index.repo_name),
+        },
+        Err(error) => DoctorCheck {
+            id: "project.index",
+            ok: false,
+            detail: error.to_string(),
+        },
     }
 }
 

@@ -89,6 +89,35 @@ fn doctor_uses_project_local_paths() {
     fs::create_dir_all(project.join(".claude")).expect("claude dir creates");
     fs::create_dir_all(project.join(".codex")).expect("codex dir creates");
     fs::create_dir_all(project.join(".cursor")).expect("cursor dir creates");
+    fs::create_dir_all(project.join(".descry/state")).expect("state dir creates");
+    fs::create_dir_all(project.join(".descry/memory")).expect("memory dir creates");
+    fs::write(
+        project.join(".descry/project.yml"),
+        r#"
+project:
+  name: repo
+assets: []
+actions: {}
+"#,
+    )
+    .expect("project policy writes");
+    descry_context::write_project_index(
+        &descry_context::ProjectIndex {
+            repo_root: project.clone(),
+            repo_name: String::from("repo"),
+            branch: Some(String::from("main")),
+            languages: vec![String::from("rust")],
+            frameworks: vec![String::from("cargo")],
+            source_paths: Vec::new(),
+            test_paths: Vec::new(),
+            infra_paths: Vec::new(),
+            config_paths: Vec::new(),
+            secret_paths: Vec::new(),
+            deploy_paths: Vec::new(),
+        },
+        &project.join(".descry/state/project-index.json"),
+    )
+    .expect("project index writes");
     write_claude_settings_with_hook(&project.join(".claude/settings.json"));
     write_codex_hooks(&project.join(".codex/hooks.json"));
     fs::write(
@@ -103,6 +132,13 @@ fn doctor_uses_project_local_paths() {
     assert_eq!(exit_code, 0);
     let json: Value = serde_json::from_slice(&output).expect("stdout is json");
     assert_eq!(json["ok"], true);
+    let checks = json["checks"].as_array().expect("checks is array");
+    assert!(checks
+        .iter()
+        .any(|check| check["id"] == "project.config" && check["ok"] == true));
+    assert!(checks
+        .iter()
+        .any(|check| check["id"] == "project.index" && check["ok"] == true));
 }
 
 fn run_doctor(
