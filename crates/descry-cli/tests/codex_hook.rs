@@ -42,8 +42,13 @@ fn cli(audit: &std::path::Path) -> Cli {
             action: HookAction::Codex {
                 action: CodexHookAction::Pretooluse {
                     policy: workspace_root().join("policies/safe-defaults.yml"),
+                    project: audit
+                        .parent()
+                        .expect("audit has parent")
+                        .join("project.yml"),
                     audit: audit.to_path_buf(),
                     context: audit.parent().expect("audit has parent").join("context.md"),
+                    state: audit.parent().expect("audit has parent").join("state"),
                     approvals: audit
                         .parent()
                         .expect("audit has parent")

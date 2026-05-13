@@ -1,12 +1,24 @@
+use std::fs;
 use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 
-use descry_core::{ActionContextPacket, Confidence, Decision, DecisionOutput, RiskScore};
+use descry_core::ActionContextPacket;
+use descry_engine::{build_decision_input, evaluate, EvaluationRuntime};
+use descry_policy::ProjectPolicy;
 use serde_json::json;
 
 use crate::{CliError, Result};
 
+pub struct EvaluateConfig {
+    pub policy: PathBuf,
+    pub project: PathBuf,
+    pub approvals: PathBuf,
+    pub behavior: PathBuf,
+}
+
 pub fn run(
     stdin: bool,
+    config: EvaluateConfig,
     input: &mut dyn Read,
     output: &mut dyn Write,
     error: &mut dyn Write,
@@ -20,8 +32,20 @@ pub fn run(
     input.read_to_end(&mut body)?;
 
     match serde_json::from_slice::<ActionContextPacket>(&body) {
-        Ok(_acp) => {
-            serde_json::to_writer(output, &shim_decision())
+        Ok(acp) => {
+            let loaded_policy = crate::commands::policy_source::load_policy(&config.policy)?;
+            let project_config = load_project_policy(&config.project)?;
+            let decision_input = build_decision_input(acp);
+            let decision = evaluate(
+                decision_input,
+                EvaluationRuntime {
+                    policy: &loaded_policy.policy,
+                    project_config: &project_config,
+                    approvals_path: &config.approvals,
+                    behavior_path: &config.behavior,
+                },
+            );
+            serde_json::to_writer(output, &decision)
                 .map_err(|error| CliError::new(error.to_string(), 1))?;
             Ok(())
         }
@@ -32,19 +56,29 @@ pub fn run(
     }
 }
 
-fn shim_decision() -> DecisionOutput {
-    DecisionOutput {
-        decision: Decision::Allow,
-        risk_score: RiskScore::try_from(0).expect("zero is a valid risk score"),
-        confidence: Confidence::try_from(1.0).expect("one is a valid confidence"),
-        reason: String::from("shim: no policy yet"),
-        conditions: Vec::new(),
+pub(crate) fn load_project_policy(path: &Path) -> Result<ProjectPolicy> {
+    if !path.exists() {
+        return Ok(ProjectPolicy::default());
     }
+
+    let body = fs::read_to_string(path)?;
+    ProjectPolicy::load_yaml(&body).map_err(|error| CliError::new(error.to_string(), 2))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::run;
+    use std::path::PathBuf;
+
+    use super::{run, EvaluateConfig};
+
+    fn config() -> EvaluateConfig {
+        EvaluateConfig {
+            policy: PathBuf::from("policies/safe-defaults.yml"),
+            project: PathBuf::from(".descry/project.yml"),
+            approvals: PathBuf::from(".descry/memory/approvals.jsonl"),
+            behavior: PathBuf::from(".descry/memory/behavior.json"),
+        }
+    }
 
     #[test]
     fn evaluate_stdin_writes_allow_decision() {
@@ -53,7 +87,7 @@ mod tests {
         let mut output = Vec::new();
         let mut error = Vec::new();
 
-        run(true, &mut input, &mut output, &mut error).expect("evaluate succeeds");
+        run(true, config(), &mut input, &mut output, &mut error).expect("evaluate succeeds");
 
         let output = String::from_utf8(output).expect("stdout is utf8");
         assert!(output.contains(r#""decision":"allow""#));
@@ -66,7 +100,8 @@ mod tests {
         let mut output = Vec::new();
         let mut error = Vec::new();
 
-        let failure = run(true, &mut input, &mut output, &mut error).expect_err("parse fails");
+        let failure =
+            run(true, config(), &mut input, &mut output, &mut error).expect_err("parse fails");
 
         assert_eq!(failure.exit_code(), 2);
         assert!(output.is_empty());

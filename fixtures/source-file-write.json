@@ -1,0 +1,36 @@
+{
+  "actor": {
+    "type": "agent",
+    "name": "claude-code",
+    "owner": "maciej",
+    "trust_level": "local_dev_agent"
+  },
+  "action": {
+    "type": "file.write",
+    "verb": "write",
+    "target": "src/auth/session.ts",
+    "diff_summary": "update session expiry handling",
+    "argument_keys": []
+  },
+  "intent": {
+    "active_task": "fix login session expiry",
+    "source": "user_prompt",
+    "linked_issue": null
+  },
+  "asset": {
+    "type": "code_file",
+    "sensitivity": "normal",
+    "environment": "local"
+  },
+  "context": {
+    "repo": "descry",
+    "branch": "fix/session-expiry",
+    "recent_files": ["src/auth/session.ts"],
+    "recent_approvals": []
+  },
+  "blast_radius": {
+    "reversible": true,
+    "customer_impact": "none",
+    "financial_impact": "none"
+  }
+}

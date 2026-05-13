@@ -1,0 +1,36 @@
+{
+  "actor": {
+    "type": "agent",
+    "name": "claude-code",
+    "owner": "maciej",
+    "trust_level": "local_dev_agent"
+  },
+  "action": {
+    "type": "file.write",
+    "verb": "write",
+    "target": ".github/workflows/deploy.yml",
+    "diff_summary": "update deploy workflow",
+    "argument_keys": []
+  },
+  "intent": {
+    "active_task": null,
+    "source": "unknown",
+    "linked_issue": null
+  },
+  "asset": {
+    "type": "code_file",
+    "sensitivity": "unknown",
+    "environment": "local"
+  },
+  "context": {
+    "repo": "descry",
+    "branch": "dg-003",
+    "recent_files": [],
+    "recent_approvals": []
+  },
+  "blast_radius": {
+    "reversible": true,
+    "customer_impact": "none",
+    "financial_impact": "none"
+  }
+}

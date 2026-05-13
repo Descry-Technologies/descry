@@ -17,7 +17,7 @@ version = "0.0.0"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/descry-dev/descry"
-homepage = "https://decry.app"
+homepage = "https://descry.app"
 rust-version = "1.75"
 
 [workspace.dependencies]

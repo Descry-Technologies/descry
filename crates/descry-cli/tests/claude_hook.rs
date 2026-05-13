@@ -35,6 +35,14 @@ fn claude_pretooluse_blocks_rm_rf_home_and_writes_audit() {
     let audit_body = fs::read_to_string(&audit).expect("audit log reads");
     assert!(audit_body.contains(r#""decision":"block""#));
     assert!(!audit_body.contains("rm -rf ~"));
+    let state_dir = audit.parent().expect("audit has parent").join("state");
+    let recent_events = descry_context::read_recent_events(&state_dir).expect("events read");
+    assert_eq!(recent_events.len(), 1);
+    assert_eq!(recent_events[0].session_id.as_deref(), Some("s1"));
+    assert_eq!(recent_events[0].action_type, "shell.exec");
+    assert_eq!(recent_events[0].target, "<shell command omitted>");
+    assert_eq!(recent_events[0].decision.as_deref(), Some("block"));
+    assert!(state_dir.join("sessions/s1.jsonl").exists());
 }
 
 #[test]
@@ -241,6 +249,42 @@ assets:
     );
 }
 
+#[test]
+fn claude_pretooluse_uses_project_defaults_for_secret_write() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    let audit = tempdir.path().join("audit.log");
+    let approvals = tempdir.path().join("approvals.jsonl");
+    let mut input = claude_write_payload(".env.production");
+    let mut output = Vec::new();
+    let mut error = Vec::new();
+
+    run_with_io(
+        cli_full(
+            &audit,
+            &approvals,
+            &tempdir.path().join("missing-legacy-asset-policy.yml"),
+            &tempdir.path().join("behavior.json"),
+        ),
+        &mut input,
+        &mut output,
+        &mut error,
+    )
+    .expect("hook succeeds");
+
+    assert!(error.is_empty());
+    let output_json: Value = serde_json::from_slice(&output).expect("stdout is json");
+    assert_eq!(
+        output_json["hookSpecificOutput"]["permissionDecision"],
+        "deny"
+    );
+    assert!(
+        output_json["hookSpecificOutput"]["permissionDecisionReason"]
+            .as_str()
+            .expect("reason is string")
+            .contains("asset: secrets")
+    );
+}
+
 fn cli(audit: &std::path::Path) -> Cli {
     cli_with_approvals(
         audit,
@@ -277,8 +321,13 @@ fn cli_full(
             action: HookAction::Claude {
                 action: ClaudeHookAction::Pretooluse {
                     policy: workspace_root().join("policies/safe-defaults.yml"),
+                    project: audit
+                        .parent()
+                        .expect("audit has parent")
+                        .join("project.yml"),
                     audit: audit.to_path_buf(),
                     context: audit.parent().expect("audit has parent").join("context.md"),
+                    state: audit.parent().expect("audit has parent").join("state"),
                     approvals: approvals.to_path_buf(),
                     asset_policy: asset_policy.to_path_buf(),
                     behavior: behavior.to_path_buf(),

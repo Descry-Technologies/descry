@@ -10,13 +10,17 @@ hard_blocks:
       - "rm -rf ~"
       - "rm -rf $HOME"
       - "rm -rf ~/*"
+      - "rm -rf $HOME/*"
+      - "sudo rm -rf /"
+      - "sudo rm -rf ~"
+      - "sudo rm -rf $HOME"
     command_regex: "^\\s*rm\\s+-rf\\s*$"
     reason: "catastrophic root or home directory deletion"
   # Tier-1 protected branch force-push patterns.
   - id: force-push-protected
     action: shell.exec
     command_matches: []
-    command_regex: "git\\s+push\\s+(-f|--force(-with-lease)?)\\s+\\S+\\s+(main|master|release/.*|prod/.*)"
+    command_regex: "git\\s+push\\s+(((-f|--force(-with-lease)?)\\s+\\S+\\s+(main|master|release/[^\\s]+|prod/[^\\s]+))|(\\S+\\s+(main|master|release/[^\\s]+|prod/[^\\s]+)\\s+(-f|--force(-with-lease)?)))"
     reason: "force-push to a protected branch"
   # Tier-1 destructive control-plane operations.
   - id: control-plane-delete

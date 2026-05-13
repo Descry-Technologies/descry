@@ -256,8 +256,10 @@ dependencies = [
  "clap",
  "descry-adapters",
  "descry-audit",
+ "descry-context",
  "descry-core",
  "descry-daemon",
+ "descry-engine",
  "descry-memory",
  "descry-policy",
  "serde_json",
@@ -270,6 +272,11 @@ dependencies = [
 [[package]]
 name = "descry-context"
 version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+]
 
 [[package]]
 name = "descry-core"
@@ -295,6 +302,11 @@ dependencies = [
 [[package]]
 name = "descry-engine"
 version = "0.0.0"
+dependencies = [
+ "descry-core",
+ "descry-memory",
+ "descry-policy",
+]
 
 [[package]]
 name = "descry-memory"

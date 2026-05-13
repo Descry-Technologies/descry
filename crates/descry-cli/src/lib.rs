@@ -55,6 +55,18 @@ pub enum Commands {
     Evaluate {
         #[arg(long)]
         stdin: bool,
+        #[arg(long, default_value = "policies/safe-defaults.yml")]
+        policy: PathBuf,
+        #[arg(long, default_value = ".descry/project.yml")]
+        project: PathBuf,
+        #[arg(long, default_value = ".descry/memory/approvals.jsonl")]
+        approvals: PathBuf,
+        #[arg(long, default_value = ".descry/memory/behavior.json")]
+        behavior: PathBuf,
+    },
+    Context {
+        #[command(subcommand)]
+        action: ContextAction,
     },
     Daemon {
         #[command(subcommand)]
@@ -115,6 +127,20 @@ pub enum DaemonAction {
     Start {
         #[arg(long, default_value = "127.0.0.1:7777")]
         bind: SocketAddr,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ContextAction {
+    Build {
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+        #[arg(long, default_value = ".descry/state/project-index.json")]
+        output_path: PathBuf,
+    },
+    Show {
+        #[arg(long, default_value = ".descry/state/project-index.json")]
+        path: PathBuf,
     },
 }
 
@@ -230,10 +256,14 @@ pub enum ClaudeHookAction {
     Pretooluse {
         #[arg(long, default_value = "policies/safe-defaults.yml")]
         policy: PathBuf,
+        #[arg(long, default_value = ".descry/project.yml")]
+        project: PathBuf,
         #[arg(long, default_value = ".descry/audit.log")]
         audit: PathBuf,
         #[arg(long, default_value = ".descry/context.md")]
         context: PathBuf,
+        #[arg(long, default_value = ".descry/state")]
+        state: PathBuf,
         #[arg(long, default_value = ".descry/memory/approvals.jsonl")]
         approvals: PathBuf,
         #[arg(long, default_value = ".descry/policy.yml")]
@@ -250,10 +280,14 @@ pub enum CodexHookAction {
     Pretooluse {
         #[arg(long, default_value = "policies/safe-defaults.yml")]
         policy: PathBuf,
+        #[arg(long, default_value = ".descry/project.yml")]
+        project: PathBuf,
         #[arg(long, default_value = ".descry/audit.log")]
         audit: PathBuf,
         #[arg(long, default_value = ".descry/context.md")]
         context: PathBuf,
+        #[arg(long, default_value = ".descry/state")]
+        state: PathBuf,
         #[arg(long, default_value = ".descry/memory/approvals.jsonl")]
         approvals: PathBuf,
         #[arg(long, default_value = ".descry/policy.yml")]
@@ -270,10 +304,14 @@ pub enum CursorHookAction {
     BeforeShellExecution {
         #[arg(long, default_value = "policies/safe-defaults.yml")]
         policy: PathBuf,
+        #[arg(long, default_value = ".descry/project.yml")]
+        project: PathBuf,
         #[arg(long, default_value = ".descry/audit.log")]
         audit: PathBuf,
         #[arg(long, default_value = ".descry/context.md")]
         context: PathBuf,
+        #[arg(long, default_value = ".descry/state")]
+        state: PathBuf,
         #[arg(long, default_value = ".descry/memory/approvals.jsonl")]
         approvals: PathBuf,
         #[arg(long, default_value = ".descry/policy.yml")]
@@ -286,10 +324,14 @@ pub enum CursorHookAction {
     BeforeMcpExecution {
         #[arg(long, default_value = "policies/safe-defaults.yml")]
         policy: PathBuf,
+        #[arg(long, default_value = ".descry/project.yml")]
+        project: PathBuf,
         #[arg(long, default_value = ".descry/audit.log")]
         audit: PathBuf,
         #[arg(long, default_value = ".descry/context.md")]
         context: PathBuf,
+        #[arg(long, default_value = ".descry/state")]
+        state: PathBuf,
         #[arg(long, default_value = ".descry/memory/approvals.jsonl")]
         approvals: PathBuf,
         #[arg(long, default_value = ".descry/policy.yml")]
@@ -316,7 +358,25 @@ pub fn run_with_io(
     error: &mut dyn Write,
 ) -> Result<()> {
     match cli.command {
-        Commands::Evaluate { stdin } => commands::evaluate::run(stdin, input, output, error),
+        Commands::Evaluate {
+            stdin,
+            policy,
+            project,
+            approvals,
+            behavior,
+        } => commands::evaluate::run(
+            stdin,
+            commands::evaluate::EvaluateConfig {
+                policy,
+                project,
+                approvals,
+                behavior,
+            },
+            input,
+            output,
+            error,
+        ),
+        Commands::Context { action } => commands::context::run(action, output),
         Commands::Daemon { action } => commands::daemon::run(action),
         Commands::Policy { action } => commands::policy::run(action, output),
         Commands::Task { action } => commands::task::run(action, output),

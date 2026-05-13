@@ -189,8 +189,13 @@ fn shell_cli(audit: &std::path::Path) -> Cli {
             action: HookAction::Cursor {
                 action: CursorHookAction::BeforeShellExecution {
                     policy: workspace_root().join("policies/safe-defaults.yml"),
+                    project: audit
+                        .parent()
+                        .expect("audit has parent")
+                        .join("project.yml"),
                     audit: audit.to_path_buf(),
                     context: audit.parent().expect("audit has parent").join("context.md"),
+                    state: audit.parent().expect("audit has parent").join("state"),
                     approvals: audit
                         .parent()
                         .expect("audit has parent")
@@ -226,8 +231,13 @@ fn mcp_cli_with_approvals(audit: &std::path::Path, approvals: &std::path::Path) 
             action: HookAction::Cursor {
                 action: CursorHookAction::BeforeMcpExecution {
                     policy: workspace_root().join("policies/safe-defaults.yml"),
+                    project: audit
+                        .parent()
+                        .expect("audit has parent")
+                        .join("project.yml"),
                     audit: audit.to_path_buf(),
                     context: audit.parent().expect("audit has parent").join("context.md"),
+                    state: audit.parent().expect("audit has parent").join("state"),
                     approvals: approvals.to_path_buf(),
                     asset_policy: audit
                         .parent()

@@ -7,7 +7,7 @@ use std::fmt;
 
 use matcher::CompiledHardBlock;
 
-pub use types::{HardBlock, Policy, Project};
+pub use types::{ActionRule, AssetRule, HardBlock, Policy, Project, ProjectConfig, ProjectPolicy};
 
 #[derive(Debug)]
 pub enum PolicyError {

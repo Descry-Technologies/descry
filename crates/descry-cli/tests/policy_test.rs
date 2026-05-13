@@ -9,6 +9,8 @@ fn policy_test_matches_tier_one_fixtures() {
         ("fixtures/rm-rf-home.json", ExpectedVerdict::Block),
         ("fixtures/rm-rf-slash.json", ExpectedVerdict::Block),
         ("fixtures/rm-rf-home-var.json", ExpectedVerdict::Block),
+        ("fixtures/rm-rf-home-glob.json", ExpectedVerdict::Block),
+        ("fixtures/rm-rf-sudo-home.json", ExpectedVerdict::Block),
         ("fixtures/force-push-main.json", ExpectedVerdict::Block),
         ("fixtures/force-push-release.json", ExpectedVerdict::Block),
         ("fixtures/railway-delete.json", ExpectedVerdict::Block),

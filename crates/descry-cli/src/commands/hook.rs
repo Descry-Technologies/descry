@@ -12,7 +12,9 @@ use descry_adapters::cursor::{
     CursorMcpHookInput, CursorShellHookInput,
 };
 use descry_audit::AuditChain;
-use descry_core::{ActionContextPacket, Confidence, Decision, DecisionOutput, RiskScore};
+use descry_context::SessionEvent;
+use descry_core::{ActionContextPacket, Decision, DecisionOutput};
+use descry_engine::{build_decision_input_with_legacy_asset_policy, evaluate, EvaluationRuntime};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
@@ -40,12 +42,15 @@ pub fn run(
 #[derive(Debug)]
 struct HookRuntimeConfig {
     policy: PathBuf,
+    project: PathBuf,
     audit: PathBuf,
     context: PathBuf,
+    state: PathBuf,
     approvals: PathBuf,
     asset_policy: PathBuf,
     behavior: PathBuf,
     repo_id_hash: String,
+    session_id: Option<String>,
 }
 
 fn run_install(action: HookInstallAction, output: &mut dyn Write) -> Result<()> {
@@ -158,8 +163,10 @@ fn run_claude(
     match action {
         ClaudeHookAction::Pretooluse {
             policy,
+            project,
             audit,
             context,
+            state,
             approvals,
             asset_policy,
             behavior,
@@ -173,12 +180,15 @@ fn run_claude(
                 acp,
                 HookRuntimeConfig {
                     policy,
+                    project,
                     audit,
                     context,
+                    state,
                     approvals,
                     asset_policy,
                     behavior,
                     repo_id_hash,
+                    session_id: Some(hook_input.session_id.clone()),
                 },
             )?;
             let permission_decision = claude_permission_decision(&decision.decision);
@@ -199,8 +209,10 @@ fn run_codex(
     match action {
         CodexHookAction::Pretooluse {
             policy,
+            project,
             audit,
             context,
+            state,
             approvals,
             asset_policy,
             behavior,
@@ -214,12 +226,15 @@ fn run_codex(
                 acp,
                 HookRuntimeConfig {
                     policy,
+                    project,
                     audit,
                     context,
+                    state,
                     approvals,
                     asset_policy,
                     behavior,
                     repo_id_hash,
+                    session_id: Some(hook_input.session_id.clone()),
                 },
             )?;
             let permission_decision = codex_permission_decision(&decision.decision);
@@ -240,8 +255,10 @@ fn run_cursor(
     match action {
         CursorHookAction::BeforeShellExecution {
             policy,
+            project,
             audit,
             context,
+            state,
             approvals,
             asset_policy,
             behavior,
@@ -255,12 +272,15 @@ fn run_cursor(
                 acp,
                 HookRuntimeConfig {
                     policy,
+                    project,
                     audit,
                     context,
+                    state,
                     approvals,
                     asset_policy,
                     behavior,
                     repo_id_hash,
+                    session_id: None,
                 },
             )?;
             let cursor_decision = cursor_permission_decision(&decision.decision);
@@ -271,8 +291,10 @@ fn run_cursor(
         }
         CursorHookAction::BeforeMcpExecution {
             policy,
+            project,
             audit,
             context,
+            state,
             approvals,
             asset_policy,
             behavior,
@@ -286,12 +308,15 @@ fn run_cursor(
                 acp,
                 HookRuntimeConfig {
                     policy,
+                    project,
                     audit,
                     context,
+                    state,
                     approvals,
                     asset_policy,
                     behavior,
                     repo_id_hash,
+                    session_id: None,
                 },
             )?;
             let cursor_decision = cursor_permission_decision(&decision.decision);
@@ -320,126 +345,27 @@ fn evaluate_and_record(
 ) -> Result<DecisionOutput> {
     acp.intent.active_task = crate::commands::task::read_active_task(&runtime.context)?;
     let policy = crate::commands::policy_source::load_policy(&runtime.policy)?.policy;
-    let decision = apply_approval_layer(
-        policy.evaluate(&acp),
-        &acp,
-        &runtime.approvals,
-        &runtime.asset_policy,
-        &runtime.behavior,
-    )?;
+    let project_config = crate::commands::evaluate::load_project_policy(&runtime.project)?;
+    let decision_input =
+        build_decision_input_with_legacy_asset_policy(acp.clone(), &runtime.asset_policy);
+    let decision = evaluate(
+        decision_input,
+        EvaluationRuntime {
+            policy: &policy,
+            project_config: &project_config,
+            approvals_path: &runtime.approvals,
+            behavior_path: &runtime.behavior,
+        },
+    );
     append_audit(&runtime.audit, &runtime.repo_id_hash, &acp, &decision)?;
+    append_context_event(
+        &runtime.state,
+        runtime.session_id.as_deref(),
+        &acp,
+        &decision,
+    )?;
     record_behavior(&runtime.behavior, &acp)?;
     Ok(decision)
-}
-
-fn apply_approval_layer(
-    decision: DecisionOutput,
-    acp: &ActionContextPacket,
-    approvals_path: &Path,
-    asset_policy_path: &Path,
-    behavior_path: &Path,
-) -> Result<DecisionOutput> {
-    if decision.decision == Decision::Block && acp.action.action_type == "mcp.call" {
-        return apply_mcp_approval_override(decision, acp, approvals_path);
-    }
-    if decision.decision == Decision::Block || acp.action.action_type != "file.write" {
-        return Ok(decision);
-    }
-    let asset_policy = descry_memory::load_asset_policy(asset_policy_path)
-        .map_err(|error| CliError::new(error.to_string(), 1))?;
-    let Some(asset) = descry_memory::match_asset(&asset_policy, &acp.action.target) else {
-        return Ok(decision);
-    };
-    if acp.intent.active_task.is_some() {
-        return Ok(decision);
-    }
-
-    let now = current_epoch_seconds()?;
-    let has_approval =
-        descry_memory::has_live_approval_for_target(approvals_path, &acp.action.target, now)
-            .map_err(|error| CliError::new(error.to_string(), 1))?;
-
-    if has_approval {
-        Ok(DecisionOutput {
-            decision: Decision::AllowWithLog,
-            risk_score: RiskScore::try_from(45).expect("45 is a valid risk score"),
-            confidence: Confidence::try_from(0.9).expect("0.9 is a valid confidence"),
-            reason: format!(
-                "scoped approval matched {} write target {} (asset: {})",
-                asset.sensitivity, acp.action.target, asset.id
-            ),
-            conditions: vec![String::from("Approval applies only until its TTL expires")],
-        })
-    } else if asset.default_action == "block" {
-        Ok(DecisionOutput {
-            decision: Decision::Block,
-            risk_score: RiskScore::try_from(95).expect("95 is a valid risk score"),
-            confidence: Confidence::try_from(0.95).expect("0.95 is a valid confidence"),
-            reason: format!(
-                "{} write target {} is blocked by asset policy (asset: {})",
-                asset.sensitivity, acp.action.target, asset.id
-            ),
-            conditions: vec![format!(
-                "Run: descry approve --scope '{}' --ttl 30m for an explicit override",
-                approval_scope_hint(&acp.action.target)
-            )],
-        })
-    } else {
-        let previous_attempts = descry_memory::behavior_count(
-            behavior_path,
-            &acp.actor.name,
-            &acp.action.action_type,
-            &acp.action.target,
-        )
-        .map_err(|error| CliError::new(error.to_string(), 1))?;
-        let repeat_context = if previous_attempts > 0 {
-            format!(" after {previous_attempts} prior attempt(s)")
-        } else {
-            String::new()
-        };
-        Ok(DecisionOutput {
-            decision: Decision::RequireApproval,
-            risk_score: RiskScore::try_from(if previous_attempts > 0 { 90 } else { 80 })
-                .expect("risk score is valid"),
-            confidence: Confidence::try_from(0.9).expect("0.9 is a valid confidence"),
-            reason: format!(
-                "{} write target {} requires scoped approval{} (asset: {})",
-                asset.sensitivity, acp.action.target, repeat_context, asset.id
-            ),
-            conditions: vec![format!(
-                "Run: descry approve --scope '{}' --ttl 30m",
-                approval_scope_hint(&acp.action.target)
-            )],
-        })
-    }
-}
-
-fn apply_mcp_approval_override(
-    decision: DecisionOutput,
-    acp: &ActionContextPacket,
-    approvals_path: &Path,
-) -> Result<DecisionOutput> {
-    let now = current_epoch_seconds()?;
-    let has_approval =
-        descry_memory::has_live_approval_for_target(approvals_path, &acp.action.target, now)
-            .map_err(|error| CliError::new(error.to_string(), 1))?;
-
-    if has_approval {
-        Ok(DecisionOutput {
-            decision: Decision::AllowWithLog,
-            risk_score: RiskScore::try_from(70).expect("70 is a valid risk score"),
-            confidence: Confidence::try_from(0.9).expect("0.9 is a valid confidence"),
-            reason: format!(
-                "scoped approval matched MCP target {} after policy block: {}",
-                acp.action.target, decision.reason
-            ),
-            conditions: vec![String::from(
-                "Approval applies only to this MCP target scope until its TTL expires",
-            )],
-        })
-    } else {
-        Ok(decision)
-    }
 }
 
 fn record_behavior(behavior_path: &Path, acp: &ActionContextPacket) -> Result<()> {
@@ -455,12 +381,23 @@ fn record_behavior(behavior_path: &Path, acp: &ActionContextPacket) -> Result<()
     Ok(())
 }
 
-fn approval_scope_hint(target: &str) -> String {
-    if let Some((prefix, _)) = target.rsplit_once('/') {
-        format!("{prefix}/**")
-    } else {
-        target.to_string()
-    }
+fn append_context_event(
+    state_dir: &Path,
+    session_id: Option<&str>,
+    acp: &ActionContextPacket,
+    decision: &DecisionOutput,
+) -> Result<()> {
+    let event = SessionEvent {
+        timestamp_unix: current_epoch_seconds()?,
+        session_id: session_id.map(ToString::to_string),
+        harness: acp.actor.name.clone(),
+        user_prompt: None,
+        action_type: acp.action.action_type.clone(),
+        target: descry_context::sanitized_event_target(&acp.action.action_type, &acp.action.target),
+        decision: Some(decision_name(&decision.decision).to_string()),
+    };
+    descry_context::append_session_event(state_dir, &event)
+        .map_err(|error| CliError::new(error.to_string(), 1))
 }
 
 fn current_epoch_seconds() -> Result<u64> {

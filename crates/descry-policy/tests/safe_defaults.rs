@@ -10,6 +10,8 @@ fn safe_defaults_match_tier_one_fixtures() {
         ("../../../fixtures/rm-rf-home.json", Decision::Block),
         ("../../../fixtures/rm-rf-slash.json", Decision::Block),
         ("../../../fixtures/rm-rf-home-var.json", Decision::Block),
+        ("../../../fixtures/rm-rf-home-glob.json", Decision::Block),
+        ("../../../fixtures/rm-rf-sudo-home.json", Decision::Block),
         ("../../../fixtures/force-push-main.json", Decision::Block),
         ("../../../fixtures/force-push-release.json", Decision::Block),
         ("../../../fixtures/railway-delete.json", Decision::Block),
@@ -42,6 +44,12 @@ fn include_str_by_path(path: &str) -> &'static str {
         "../../../fixtures/rm-rf-slash.json" => include_str!("../../../fixtures/rm-rf-slash.json"),
         "../../../fixtures/rm-rf-home-var.json" => {
             include_str!("../../../fixtures/rm-rf-home-var.json")
+        }
+        "../../../fixtures/rm-rf-home-glob.json" => {
+            include_str!("../../../fixtures/rm-rf-home-glob.json")
+        }
+        "../../../fixtures/rm-rf-sudo-home.json" => {
+            include_str!("../../../fixtures/rm-rf-sudo-home.json")
         }
         "../../../fixtures/force-push-main.json" => {
             include_str!("../../../fixtures/force-push-main.json")

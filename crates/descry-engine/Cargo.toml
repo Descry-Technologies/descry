@@ -10,3 +10,8 @@ rust-version.workspace = true
 
 [lib]
 path = "src/lib.rs"
+
+[dependencies]
+descry-core = { path = "../descry-core" }
+descry-memory = { path = "../descry-memory" }
+descry-policy = { path = "../descry-policy" }
