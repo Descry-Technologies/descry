@@ -1,0 +1,35 @@
+{
+  "actor": {
+    "type": "agent",
+    "name": "cursor",
+    "owner": "maciej",
+    "trust_level": "local_dev_agent"
+  },
+  "action": {
+    "type": "mcp.call",
+    "verb": "call",
+    "target": "https://mcp.example.com/readonly",
+    "diff_summary": "Cursor MCP tool call: delete_project"
+  },
+  "intent": {
+    "active_task": "Inspect project metadata",
+    "source": "cursor_before_mcp_execution",
+    "linked_issue": null
+  },
+  "asset": {
+    "type": "mcp_server",
+    "sensitivity": "medium",
+    "environment": "external"
+  },
+  "context": {
+    "repo": "descry",
+    "branch": "main",
+    "recent_files": [],
+    "recent_approvals": []
+  },
+  "blast_radius": {
+    "reversible": false,
+    "customer_impact": "unknown",
+    "financial_impact": "unknown"
+  }
+}

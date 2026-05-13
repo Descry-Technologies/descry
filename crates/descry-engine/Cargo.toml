@@ -1,0 +1,12 @@
+[package]
+name = "descry-engine"
+description = "Decision engine crate for Descry Guard"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "src/lib.rs"

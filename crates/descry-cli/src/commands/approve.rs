@@ -1,0 +1,102 @@
+use std::io::Write;
+use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use descry_memory::Approval;
+use serde_json::json;
+
+use crate::{CliError, Result};
+
+pub fn run(
+    scope: String,
+    ttl: String,
+    path: PathBuf,
+    approver: String,
+    output: &mut dyn Write,
+) -> Result<()> {
+    let now = current_epoch_seconds()?;
+    let ttl_seconds = parse_ttl_seconds(&ttl)?;
+    let approval = Approval {
+        scope,
+        created_at_epoch_seconds: now,
+        expires_at_epoch_seconds: now + ttl_seconds,
+        approver,
+    };
+
+    descry_memory::append_approval(&path, &approval)
+        .map_err(|error| CliError::new(error.to_string(), 1))?;
+    writeln!(
+        output,
+        "{}",
+        json!({
+            "scope": approval.scope,
+            "created_at_epoch_seconds": approval.created_at_epoch_seconds,
+            "expires_at_epoch_seconds": approval.expires_at_epoch_seconds,
+            "approver": approval.approver,
+            "path": path
+        })
+    )?;
+    Ok(())
+}
+
+fn current_epoch_seconds() -> Result<u64> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .map_err(|error| CliError::new(error.to_string(), 1))
+}
+
+fn parse_ttl_seconds(ttl: &str) -> Result<u64> {
+    let trimmed = ttl.trim();
+    if trimmed.is_empty() {
+        return Err(CliError::new("ttl cannot be empty", 2));
+    }
+    let (number, multiplier) = match trimmed.as_bytes().last().copied() {
+        Some(b's') => (&trimmed[..trimmed.len() - 1], 1),
+        Some(b'm') => (&trimmed[..trimmed.len() - 1], 60),
+        Some(b'h') => (&trimmed[..trimmed.len() - 1], 60 * 60),
+        Some(b'd') => (&trimmed[..trimmed.len() - 1], 24 * 60 * 60),
+        Some(byte) if byte.is_ascii_digit() => (trimmed, 1),
+        _ => {
+            return Err(CliError::new(
+                "ttl must use seconds, m, h, or d suffix, e.g. 30m",
+                2,
+            ));
+        }
+    };
+    let value = number
+        .parse::<u64>()
+        .map_err(|_| CliError::new("ttl must start with a positive integer", 2))?;
+    if value == 0 {
+        return Err(CliError::new("ttl must be greater than zero", 2));
+    }
+    Ok(value * multiplier)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_ttl_seconds;
+
+    #[test]
+    fn parses_ttl_suffixes() {
+        assert_eq!(parse_ttl_seconds("30").expect("ttl parses"), 30);
+        assert_eq!(parse_ttl_seconds("30s").expect("ttl parses"), 30);
+        assert_eq!(parse_ttl_seconds("30m").expect("ttl parses"), 1_800);
+        assert_eq!(parse_ttl_seconds("2h").expect("ttl parses"), 7_200);
+        assert_eq!(parse_ttl_seconds("1d").expect("ttl parses"), 86_400);
+    }
+
+    #[test]
+    fn rejects_invalid_ttl() {
+        assert_eq!(
+            parse_ttl_seconds("0m").expect_err("zero fails").exit_code(),
+            2
+        );
+        assert_eq!(
+            parse_ttl_seconds("soon")
+                .expect_err("invalid suffix fails")
+                .exit_code(),
+            2
+        );
+    }
+}

@@ -1,0 +1,46 @@
+# Rust
+/target/
+**/target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Debug + profiling artifacts
+*.pdb
+perf.data*
+flamegraph.svg
+*.profraw
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Direnv / env
+.envrc
+.env
+.env.*
+!.env.example
+
+# Local Descry runtime state (when dogfooded)
+.descry/memory/
+.descry/audit.log
+
+# Agent loop ephemera (kept out of the public engine repo)
+.claude/
+agents/
+agents/codex-runs/
+agents/tests/
+
+# Codex CLI session markers
+.codex
+.codex/
+
+# Build / test caches
+.cache/
+.pytest_cache/
+node_modules/
+
+# OS
+Thumbs.db

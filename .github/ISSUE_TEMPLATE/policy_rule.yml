@@ -1,0 +1,26 @@
+name: Policy rule request
+description: Propose a new Descry policy rule or fixture.
+title: "[Policy]: "
+labels: ["policy"]
+body:
+  - type: textarea
+    id: scenario
+    attributes:
+      label: Scenario
+      description: What unsafe action should Descry catch?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Link an incident, issue, postmortem, or reproducible local fixture.
+    validations:
+      required: true
+  - type: textarea
+    id: false_positives
+    attributes:
+      label: False Positive Risk
+      description: What safe workflows might this accidentally block?
+    validations:
+      required: true

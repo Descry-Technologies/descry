@@ -1,0 +1,19 @@
+[package]
+name = "descry-daemon"
+description = "Local daemon route skeleton for Descry Guard"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+axum = { workspace = true }
+descry-core = { path = "../descry-core" }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tower = { workspace = true }

@@ -1,0 +1,35 @@
+{
+  "actor": {
+    "type": "agent",
+    "name": "claude-code",
+    "owner": "maciej",
+    "trust_level": "local_dev_agent"
+  },
+  "action": {
+    "type": "shell.exec",
+    "verb": "run",
+    "target": "aws rds delete-db-instance --db-instance-identifier prod-db --skip-final-snapshot",
+    "diff_summary": null
+  },
+  "intent": {
+    "active_task": "DG-016",
+    "source": "user_prompt",
+    "linked_issue": null
+  },
+  "asset": {
+    "type": "local_command",
+    "sensitivity": "high",
+    "environment": "local"
+  },
+  "context": {
+    "repo": "descry",
+    "branch": "main",
+    "recent_files": [],
+    "recent_approvals": []
+  },
+  "blast_radius": {
+    "reversible": false,
+    "customer_impact": "unknown",
+    "financial_impact": "unknown"
+  }
+}

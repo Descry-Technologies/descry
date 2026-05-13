@@ -1,0 +1,35 @@
+{
+  "actor": {
+    "type": "agent",
+    "name": "codex",
+    "owner": "aniol",
+    "trust_level": "local_dev_agent"
+  },
+  "action": {
+    "type": "file.read",
+    "verb": "read",
+    "target": "README.md",
+    "diff_summary": null
+  },
+  "intent": {
+    "active_task": null,
+    "source": "user_prompt",
+    "linked_issue": null
+  },
+  "asset": {
+    "type": "code_file",
+    "sensitivity": "low",
+    "environment": "local"
+  },
+  "context": {
+    "repo": "descry/descry",
+    "branch": "main",
+    "recent_files": [],
+    "recent_approvals": []
+  },
+  "blast_radius": {
+    "reversible": true,
+    "customer_impact": "none",
+    "financial_impact": "none"
+  }
+}

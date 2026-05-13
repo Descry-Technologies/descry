@@ -1,0 +1,42 @@
+{
+  "actor": {
+    "type": "agent",
+    "name": "claude-code",
+    "owner": "maciej",
+    "trust_level": "cloud_agent"
+  },
+  "action": {
+    "type": "shell.exec",
+    "verb": "run",
+    "target": "cargo test -p descry-core",
+    "diff_summary": "Runs focused core crate tests"
+  },
+  "intent": {
+    "active_task": "Bootstrap Rust workspace and ACP v0.1 types",
+    "source": "plan",
+    "linked_issue": "DG-001"
+  },
+  "asset": {
+    "type": "repository",
+    "sensitivity": "medium",
+    "environment": "development"
+  },
+  "context": {
+    "repo": "descry/descry",
+    "branch": "dg-001-bootstrap",
+    "recent_files": [
+      "crates/descry-core/src/acp.rs",
+      "crates/descry-core/src/decision.rs",
+      "crates/descry-core/src/risk.rs"
+    ],
+    "recent_approvals": [
+      "human:Cargo.toml",
+      "human:crates/descry-core/**"
+    ]
+  },
+  "blast_radius": {
+    "reversible": false,
+    "customer_impact": "low",
+    "financial_impact": "none"
+  }
+}

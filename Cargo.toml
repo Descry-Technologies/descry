@@ -1,0 +1,33 @@
+[workspace]
+members = [
+    "crates/descry-core",
+    "crates/descry-policy",
+    "crates/descry-context",
+    "crates/descry-memory",
+    "crates/descry-audit",
+    "crates/descry-engine",
+    "crates/descry-daemon",
+    "crates/descry-adapters",
+    "crates/descry-cli",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/descry-dev/descry"
+homepage = "https://descry.dev"
+rust-version = "1.75"
+
+[workspace.dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json"] }
+clap = { version = "4", features = ["derive"] }
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yml = "=0.0.12"
+sha2 = "0.10"
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "signal"] }
+tower = "0.5"

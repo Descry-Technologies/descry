@@ -1,0 +1,81 @@
+project:
+  name: descry
+  version: "DG-003"
+hard_blocks:
+  # Tier-1 catastrophic local deletion patterns.
+  - id: rm-root-home
+    action: shell.exec
+    command_matches:
+      - "rm -rf /"
+      - "rm -rf ~"
+      - "rm -rf $HOME"
+      - "rm -rf ~/*"
+    command_regex: "^\\s*rm\\s+-rf\\s*$"
+    reason: "catastrophic root or home directory deletion"
+  # Tier-1 protected branch force-push patterns.
+  - id: force-push-protected
+    action: shell.exec
+    command_matches: []
+    command_regex: "git\\s+push\\s+(-f|--force(-with-lease)?)\\s+\\S+\\s+(main|master|release/.*|prod/.*)"
+    reason: "force-push to a protected branch"
+  # Tier-1 destructive control-plane operations.
+  - id: control-plane-delete
+    action: shell.exec
+    command_matches:
+      - "railway volume delete"
+      - "fly volumes destroy"
+      - "fly apps destroy"
+      - "vercel project remove"
+      - "aws ec2 terminate-instances"
+      - "aws rds delete-db-instance"
+      - "aws rds delete-db-cluster"
+      - "gcloud compute instances delete"
+      - "gcloud sql instances delete"
+      - "az group delete"
+    command_regex: "(curl\\s+(-X\\s+DELETE|--request\\s+DELETE)\\s+https?://[^\\s]*\\.(railway\\.app|fly\\.io|vercel\\.app/api/internal)|aws\\s+(ec2\\s+terminate-instances|rds\\s+delete-db-(instance|cluster))|gcloud\\s+(compute\\s+instances\\s+delete|sql\\s+instances\\s+delete)|az\\s+group\\s+delete)"
+    reason: "destructive hosted control-plane operation"
+  # Tier-1 destructive database operations. `DELETE FROM` without `WHERE`
+  # remains deferred until SQL-aware matching is available.
+  - id: destructive-database-command
+    action: shell.exec
+    command_matches:
+      - "DROP DATABASE"
+      - "DROP TABLE"
+      - "TRUNCATE TABLE"
+      - "db.dropDatabase()"
+      - "deleteMany({})"
+    command_regex: "(?i)(drop\\s+(database|table)\\b|truncate\\s+(table\\s+)?[a-z0-9_.\"-]+|db\\.dropDatabase\\s*\\(|db\\.[a-z0-9_]+\\.drop\\s*\\(|db\\.[a-z0-9_]+\\.deleteMany\\s*\\(\\s*\\{\\s*\\}\\s*\\))"
+    reason: "destructive database operation"
+  # Tier-1 MCP control-plane targets. Until MCP-specific approval policy lands,
+  # production/admin control-plane MCP endpoints require a hard block.
+  - id: mcp-production-control-plane
+    action: mcp.call
+    target_matches:
+      - "prod-mcp"
+      - "production-mcp"
+      - "admin-mcp"
+      - "control-plane-mcp"
+    target_regex: "(?i)(prod|production|admin|control-plane)[^\\s]*(mcp|tool)|(?:mcp|tool)[^\\s]*(prod|production|admin|control-plane)"
+    reason: "MCP call targets production or admin control plane"
+  # Tier-1 MCP tool names with destructive semantics.
+  - id: mcp-destructive-tool
+    action: mcp.call
+    summary_matches:
+      - "delete_project"
+      - "destroy_project"
+      - "delete_database"
+      - "drop_database"
+      - "destroy_volume"
+      - "remove_secret"
+    summary_regex: "(?i)Cursor MCP tool call:.*(delete|destroy|drop|purge|remove)_"
+    reason: "MCP tool name indicates destructive operation"
+  - id: mcp-dangerous-argument
+    action: mcp.call
+    argument_key_matches:
+      - "confirm_destroy"
+      - "confirm_delete"
+      - "delete_confirmation"
+      - "force_delete"
+      - "force_destroy"
+    argument_key_regex: "(?i)^(dangerously_|force_|confirm_).*(delete|destroy|drop|purge|remove)"
+    reason: "MCP argument key indicates destructive confirmation"

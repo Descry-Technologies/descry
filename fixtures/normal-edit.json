@@ -1,0 +1,35 @@
+{
+  "actor": {
+    "type": "agent",
+    "name": "claude-code",
+    "owner": "maciej",
+    "trust_level": "local_dev_agent"
+  },
+  "action": {
+    "type": "file.write",
+    "verb": "modify",
+    "target": "src/auth/session.ts",
+    "diff_summary": "Changes session expiry validation"
+  },
+  "intent": {
+    "active_task": "Fix login session bug",
+    "source": "user_prompt",
+    "linked_issue": "AUTH-241"
+  },
+  "asset": {
+    "type": "code_file",
+    "sensitivity": "auth_critical",
+    "environment": "production_relevant"
+  },
+  "context": {
+    "repo": "descry",
+    "branch": "fix-session-expiry",
+    "recent_files": ["src/auth/session.ts", "src/auth/middleware.ts"],
+    "recent_approvals": []
+  },
+  "blast_radius": {
+    "reversible": true,
+    "customer_impact": "medium",
+    "financial_impact": "none"
+  }
+}

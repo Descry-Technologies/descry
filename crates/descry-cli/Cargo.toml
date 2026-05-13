@@ -1,0 +1,32 @@
+[package]
+name = "descry-cli"
+description = "Command-line interface for Descry Guard"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "descry"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true }
+descry-adapters = { path = "../descry-adapters" }
+descry-audit = { path = "../descry-audit" }
+descry-core = { path = "../descry-core" }
+descry-daemon = { path = "../descry-daemon" }
+descry-memory = { path = "../descry-memory" }
+descry-policy = { path = "../descry-policy" }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+time = { version = "0.3", features = ["formatting"] }
+tokio = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

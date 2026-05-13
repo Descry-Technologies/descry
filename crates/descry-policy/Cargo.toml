@@ -1,0 +1,18 @@
+[package]
+name = "descry-policy"
+description = "Policy loader and deterministic matchers for Descry Guard"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+descry-core = { path = "../descry-core" }
+regex = { workspace = true }
+serde = { workspace = true }
+serde_yml = { workspace = true }
