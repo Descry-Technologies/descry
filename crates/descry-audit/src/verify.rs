@@ -22,7 +22,7 @@ pub fn verify_file(path: &Path, repo_id_hash: &str) -> VerifyOutcome {
                 AuditError::HashMismatch { seq } => *seq,
                 AuditError::SeqGap { expected, .. } => *expected,
                 AuditError::PrevHashMismatch { seq } => *seq,
-                AuditError::Io(_) | AuditError::Serde(_) => 0,
+                AuditError::Io(_) | AuditError::Serde(_) | AuditError::BrokenChain { .. } => 0,
             };
             VerifyOutcome::Broken {
                 at_seq,

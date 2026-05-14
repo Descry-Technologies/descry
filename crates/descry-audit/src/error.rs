@@ -10,6 +10,7 @@ pub enum AuditError {
     HashMismatch { seq: u64 },
     SeqGap { expected: u64, found: u64 },
     PrevHashMismatch { seq: u64 },
+    BrokenChain { reason: String },
 }
 
 impl fmt::Display for AuditError {
@@ -30,6 +31,7 @@ impl fmt::Display for AuditError {
             Self::PrevHashMismatch { seq } => {
                 write!(formatter, "previous hash mismatch at seq {seq}")
             }
+            Self::BrokenChain { reason } => write!(formatter, "broken audit chain: {reason}"),
         }
     }
 }
@@ -42,7 +44,8 @@ impl Error for AuditError {
             Self::MalformedRecord { .. }
             | Self::HashMismatch { .. }
             | Self::SeqGap { .. }
-            | Self::PrevHashMismatch { .. } => None,
+            | Self::PrevHashMismatch { .. }
+            | Self::BrokenChain { .. } => None,
         }
     }
 }

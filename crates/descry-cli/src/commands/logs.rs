@@ -43,7 +43,7 @@ pub fn run(action: LogsAction, output: &mut dyn Write, _error: &mut dyn Write) -
         LogsAction::Search { query, path } => {
             let query = query.to_ascii_lowercase();
             for record in read_records(&path)? {
-                if event_matches(&record.raw, &record.event, &query) {
+                if event_matches(&record.event, &query) {
                     writeln!(
                         output,
                         "{}",
@@ -57,7 +57,6 @@ pub fn run(action: LogsAction, output: &mut dyn Write, _error: &mut dyn Write) -
 }
 
 struct RawAuditRecord {
-    raw: String,
     event: AuditEvent,
 }
 
@@ -98,24 +97,22 @@ fn read_records(path: &std::path::Path) -> Result<Vec<RawAuditRecord>> {
                 1,
             )
         })?;
-        records.push(RawAuditRecord { raw, event });
+        records.push(RawAuditRecord { event });
     }
     Ok(records)
 }
 
-fn event_matches(raw: &str, event: &AuditEvent, query: &str) -> bool {
-    raw.to_ascii_lowercase().contains(query)
-        || event.decision.to_ascii_lowercase().contains(query)
-        || event
-            .rule_id
-            .as_deref()
-            .unwrap_or_default()
-            .to_ascii_lowercase()
-            .contains(query)
-        || event
-            .reason
-            .as_deref()
-            .unwrap_or_default()
-            .to_ascii_lowercase()
-            .contains(query)
+fn event_matches(event: &AuditEvent, query: &str) -> bool {
+    [
+        Some(event.decision.as_str()),
+        event.rule_id.as_deref(),
+        event.reason.as_deref(),
+        event.action_type.as_deref(),
+        event.asset_id.as_deref(),
+        event.host.as_deref(),
+        event.sanitized_target.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|value| value.to_ascii_lowercase().contains(query))
 }

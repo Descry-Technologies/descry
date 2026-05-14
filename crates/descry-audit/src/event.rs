@@ -9,8 +9,33 @@ pub struct AuditEvent {
     pub acp_hash: String,
     pub rule_id: Option<String>,
     pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_fingerprint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sanitized_target: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id_hash: Option<String>,
     pub prev_hash: String,
     pub record_hash: String,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct AuditEventContext {
+    pub host: Option<String>,
+    pub actor: Option<String>,
+    pub action_type: Option<String>,
+    pub target_fingerprint: Option<String>,
+    pub sanitized_target: Option<String>,
+    pub asset_id: Option<String>,
+    pub session_id_hash: Option<String>,
 }
 
 impl AuditEvent {
@@ -23,6 +48,28 @@ impl AuditEvent {
         reason: Option<String>,
         prev_hash: impl Into<String>,
     ) -> Self {
+        Self::pending_with_context(
+            seq,
+            timestamp,
+            decision,
+            acp_hash,
+            rule_id,
+            reason,
+            prev_hash,
+            AuditEventContext::default(),
+        )
+    }
+
+    pub fn pending_with_context(
+        seq: u64,
+        timestamp: impl Into<String>,
+        decision: impl Into<String>,
+        acp_hash: impl Into<String>,
+        rule_id: Option<String>,
+        reason: Option<String>,
+        prev_hash: impl Into<String>,
+        context: AuditEventContext,
+    ) -> Self {
         Self {
             seq,
             timestamp: timestamp.into(),
@@ -30,6 +77,13 @@ impl AuditEvent {
             acp_hash: acp_hash.into(),
             rule_id,
             reason,
+            host: context.host,
+            actor: context.actor,
+            action_type: context.action_type,
+            target_fingerprint: context.target_fingerprint,
+            sanitized_target: context.sanitized_target,
+            asset_id: context.asset_id,
+            session_id_hash: context.session_id_hash,
             prev_hash: prev_hash.into(),
             record_hash: String::new(),
         }

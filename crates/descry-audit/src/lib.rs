@@ -7,5 +7,5 @@ mod verify;
 
 pub use chain::AuditChain;
 pub use error::AuditError;
-pub use event::AuditEvent;
+pub use event::{AuditEvent, AuditEventContext};
 pub use verify::{verify_file, VerifyOutcome};

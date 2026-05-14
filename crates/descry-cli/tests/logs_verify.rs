@@ -1,6 +1,6 @@
 use std::fs;
 
-use descry_audit::AuditChain;
+use descry_audit::{AuditChain, AuditEventContext};
 use descry_cli::{run_with_io, Cli, Commands, LogsAction};
 use serde_json::Value;
 
@@ -92,6 +92,30 @@ fn logs_search_filters_by_reason_rule_or_decision() {
     assert!(!body.contains("\"seq\":3"));
 }
 
+#[test]
+fn logs_search_filters_by_structured_audit_fields() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    let path = tempdir.path().join("audit.log");
+    write_audit_log(&path);
+
+    let cli = Cli {
+        command: Commands::Logs {
+            action: LogsAction::Search {
+                query: String::from("infra"),
+                path,
+            },
+        },
+    };
+    let (exit_code, output, error) = run_cli(cli);
+
+    assert_eq!(exit_code, 0);
+    assert!(error.is_empty());
+    let body = std::str::from_utf8(&output).expect("stdout utf8");
+    assert!(body.contains("\"seq\":2"));
+    assert!(!body.contains("\"seq\":1"));
+    assert!(!body.contains("\"seq\":3"));
+}
+
 fn run_logs_verify(path: &std::path::Path, repo_id_hash: &str) -> (i32, Vec<u8>, Vec<u8>) {
     let cli = Cli {
         command: Commands::Logs {
@@ -107,13 +131,27 @@ fn run_logs_verify(path: &std::path::Path, repo_id_hash: &str) -> (i32, Vec<u8>,
 fn write_audit_log(path: &std::path::Path) {
     let mut chain = AuditChain::open(path, "test-repo").expect("chain opens");
     for seq in 1..=3 {
+        let context = if seq == 2 {
+            AuditEventContext {
+                host: Some(String::from("claude-code")),
+                actor: Some(String::from("agent:claude-code")),
+                action_type: Some(String::from("file.write")),
+                target_fingerprint: Some(String::from("fingerprint-2")),
+                sanitized_target: Some(String::from(".github/workflows/deploy.yml")),
+                asset_id: Some(String::from("infra")),
+                session_id_hash: Some(String::from("session-hash")),
+            }
+        } else {
+            AuditEventContext::default()
+        };
         chain
-            .append(
+            .append_with_context(
                 format!("2026-05-11T20:00:0{seq}Z"),
                 if seq == 2 { "block" } else { "allow" },
                 format!("acp-{seq}"),
                 Some(format!("rule-{seq}")),
                 Some(format!("reason-{seq}")),
+                context,
             )
             .expect("append succeeds");
     }

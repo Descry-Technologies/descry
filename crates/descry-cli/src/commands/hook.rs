@@ -11,8 +11,10 @@ use descry_adapters::cursor::{
     cursor_output, normalize_before_mcp_execution, normalize_before_shell_execution,
     CursorMcpHookInput, CursorShellHookInput,
 };
-use descry_audit::AuditChain;
-use descry_core::{ActionContextPacket, Decision, DecisionOutput, RuntimeContextConfig};
+use descry_audit::{AuditChain, AuditEventContext};
+use descry_core::{
+    ActionContextPacket, Decision, DecisionInput, DecisionOutput, RuntimeContextConfig,
+};
 use descry_engine::evaluate_action;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -522,8 +524,9 @@ fn evaluate_and_record(
     append_audit(
         &runtime.audit,
         &runtime.repo_id_hash,
-        &evaluated.decision_input.acp,
+        &evaluated.decision_input,
         &evaluated.decision,
+        runtime.session_id.as_deref(),
     )?;
     Ok(evaluated.decision)
 }
@@ -539,10 +542,12 @@ fn project_root_from_policy_path(project_policy_path: &Path) -> PathBuf {
 fn append_audit(
     audit_path: &std::path::Path,
     repo_id_hash: &str,
-    acp: &ActionContextPacket,
+    decision_input: &DecisionInput,
     decision: &descry_core::DecisionOutput,
+    session_id: Option<&str>,
 ) -> Result<()> {
-    let mut chain = AuditChain::open(audit_path, repo_id_hash)
+    let acp = &decision_input.acp;
+    let mut chain = AuditChain::open_verified(audit_path, repo_id_hash)
         .map_err(|audit_error| CliError::new(audit_error.to_string(), 1))?;
     let timestamp = OffsetDateTime::now_utc()
         .format(&Rfc3339)
@@ -550,13 +555,24 @@ fn append_audit(
     let acp_hash = hash_acp(acp)?;
     let rule_id = matched_rule_id(&decision.reason);
 
+    let context = AuditEventContext {
+        host: Some(acp.actor.name.clone()),
+        actor: Some(format!("{}:{}", acp.actor.actor_type, acp.actor.name)),
+        action_type: Some(acp.action.action_type.clone()),
+        target_fingerprint: Some(hash_text(&acp.action.target)),
+        sanitized_target: Some(sanitized_audit_target(acp)),
+        asset_id: decision_input.asset.as_ref().map(|asset| asset.id.clone()),
+        session_id_hash: session_id.map(hash_text),
+    };
+
     chain
-        .append(
+        .append_with_context(
             timestamp,
             decision_name(&decision.decision),
             acp_hash,
             rule_id,
             Some(decision.reason.clone()),
+            context,
         )
         .map_err(|audit_error| CliError::new(audit_error.to_string(), 1))?;
     Ok(())
@@ -565,12 +581,31 @@ fn append_audit(
 fn hash_acp(acp: &ActionContextPacket) -> Result<String> {
     let bytes = serde_json::to_vec(acp)
         .map_err(|serialize_error| CliError::new(serialize_error.to_string(), 1))?;
+    Ok(hex_digest(&bytes))
+}
+
+fn hash_text(text: impl AsRef<str>) -> String {
+    hex_digest(text.as_ref().as_bytes())
+}
+
+fn hex_digest(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     let mut hex = String::with_capacity(64);
     for byte in digest {
         hex.push_str(&format!("{byte:02x}"));
     }
-    Ok(hex)
+    hex
+}
+
+fn sanitized_audit_target(acp: &ActionContextPacket) -> String {
+    if acp.action.action_type == "shell.exec" {
+        return String::from("shell.exec");
+    }
+    acp.action
+        .target
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn claude_permission_decision(decision: &Decision) -> &'static str {

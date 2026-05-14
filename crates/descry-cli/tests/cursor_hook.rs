@@ -54,7 +54,7 @@ fn cursor_before_mcp_execution_allows_and_writes_audit() {
     );
     let audit_body = fs::read_to_string(&audit).expect("audit log reads");
     assert!(audit_body.contains(r#""decision":"allow""#));
-    assert!(!audit_body.contains("https://mcp.example.com/mcp"));
+    assert!(audit_body.contains(r#""sanitized_target":"https://mcp.example.com/mcp""#));
 }
 
 #[test]
@@ -81,7 +81,7 @@ fn cursor_before_mcp_execution_blocks_production_control_plane() {
     );
     let audit_body = fs::read_to_string(&audit).expect("audit log reads");
     assert!(audit_body.contains(r#""decision":"block""#));
-    assert!(!audit_body.contains("https://prod-mcp.example.com/admin"));
+    assert!(audit_body.contains(r#""sanitized_target":"https://prod-mcp.example.com/admin""#));
 }
 
 #[test]

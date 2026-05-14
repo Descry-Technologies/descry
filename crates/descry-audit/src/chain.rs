@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use crate::canonical::canonical_minus_record_hash;
 use crate::hash::record_hash;
-use crate::{AuditError, AuditEvent};
+use crate::{verify_file, AuditError, AuditEvent, AuditEventContext, VerifyOutcome};
 
 pub const GENESIS_PREV_HASH: &str =
     "0000000000000000000000000000000000000000000000000000000000000000";
@@ -58,6 +58,23 @@ impl AuditChain {
         })
     }
 
+    pub fn open_verified(
+        path: impl AsRef<Path>,
+        repo_id_hash: impl Into<String>,
+    ) -> Result<Self, AuditError> {
+        let path = path.as_ref().to_path_buf();
+        let repo_id_hash = repo_id_hash.into();
+        if path.exists() {
+            match verify_file(&path, &repo_id_hash) {
+                VerifyOutcome::Ok { .. } => {}
+                VerifyOutcome::Broken { reason, .. } => {
+                    return Err(AuditError::BrokenChain { reason });
+                }
+            }
+        }
+        Self::open(path, repo_id_hash)
+    }
+
     /// Appends a record and fsyncs the file before returning.
     pub fn append(
         &mut self,
@@ -67,11 +84,30 @@ impl AuditChain {
         rule_id: Option<String>,
         reason: Option<String>,
     ) -> Result<&AuditEvent, AuditError> {
+        self.append_with_context(
+            timestamp,
+            decision,
+            acp_hash,
+            rule_id,
+            reason,
+            AuditEventContext::default(),
+        )
+    }
+
+    pub fn append_with_context(
+        &mut self,
+        timestamp: impl Into<String>,
+        decision: impl Into<String>,
+        acp_hash: impl Into<String>,
+        rule_id: Option<String>,
+        reason: Option<String>,
+        context: AuditEventContext,
+    ) -> Result<&AuditEvent, AuditError> {
         let prev_hash = self.head.as_ref().map_or_else(
             || GENESIS_PREV_HASH.to_string(),
             |event| event.record_hash.clone(),
         );
-        let mut event = AuditEvent::pending(
+        let mut event = AuditEvent::pending_with_context(
             self.next_seq,
             timestamp,
             decision,
@@ -79,6 +115,7 @@ impl AuditChain {
             rule_id,
             reason,
             prev_hash,
+            context,
         );
         let canonical = canonical_minus_record_hash(&event)?;
         event.record_hash =
@@ -156,5 +193,25 @@ mod tests {
         assert_eq!(read_back.seq, 1);
         assert_eq!(read_back.prev_hash, GENESIS_PREV_HASH);
         assert_eq!(read_back.record_hash.len(), 64);
+    }
+
+    #[test]
+    fn open_verified_refuses_tampered_chain_before_append() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("audit.log");
+        let mut chain = AuditChain::open_verified(&path, "test-repo").expect("chain opens");
+        chain
+            .append("2026-05-11T20:00:00Z", "allow", "acp-1", None, None)
+            .expect("append one");
+        chain
+            .append("2026-05-11T20:00:01Z", "block", "acp-2", None, None)
+            .expect("append two");
+
+        let body = std::fs::read_to_string(&path)
+            .expect("audit log reads")
+            .replacen("allow", "block", 1);
+        std::fs::write(&path, body).expect("audit log mutates");
+
+        AuditChain::open_verified(&path, "test-repo").expect_err("tampered chain fails");
     }
 }
