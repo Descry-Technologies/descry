@@ -1,8 +1,10 @@
 use std::io::Write;
 
 use descry_core::{ActionContextPacket, Decision};
+use descry_engine::{build_decision_input, evaluate, EvaluationRuntime};
 use serde_json::json;
 
+use crate::commands::evaluate::load_project_policy;
 use crate::commands::policy_source::load_policy;
 use crate::{CliError, ExpectedVerdict, PolicyAction, Result};
 
@@ -12,8 +14,12 @@ pub fn run(action: PolicyAction, output: &mut dyn Write) -> Result<()> {
             fixture,
             expect,
             policy,
+            project,
+            approvals,
+            behavior,
+            hard_block_only,
         } => {
-            let policy = load_policy(&policy)?.policy;
+            let loaded_policy = load_policy(&policy)?;
 
             let fixture_body = std::fs::read_to_string(&fixture)?;
             let acp: ActionContextPacket =
@@ -24,7 +30,20 @@ pub fn run(action: PolicyAction, output: &mut dyn Write) -> Result<()> {
                     )
                 })?;
 
-            let decision = policy.evaluate(&acp);
+            let decision = if hard_block_only {
+                loaded_policy.policy.evaluate(&acp)
+            } else {
+                let project_config = load_project_policy(&project)?;
+                evaluate(
+                    build_decision_input(acp),
+                    EvaluationRuntime {
+                        policy: &loaded_policy.policy,
+                        project_config: &project_config,
+                        approvals_path: &approvals,
+                        behavior_path: &behavior,
+                    },
+                )
+            };
             let verdict = verdict_name(&decision.decision);
             let expected = expect.as_str();
             let matches = verdict == expected;

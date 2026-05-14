@@ -68,13 +68,62 @@ fn policy_test_reports_mismatch() {
     assert_eq!(json["match"], false);
 }
 
+#[test]
+fn policy_test_routes_project_assets_through_engine() {
+    let cli = policy_test_cli(
+        "fixtures/infra-file-write.json",
+        ExpectedVerdict::RequireApproval,
+    );
+    let mut input = [].as_slice();
+    let mut output = Vec::new();
+    let mut error = Vec::new();
+
+    run_with_io(cli, &mut input, &mut output, &mut error).expect("policy test succeeds");
+
+    assert!(error.is_empty());
+    let json: Value = serde_json::from_slice(&output).expect("stdout is json");
+    assert_eq!(json["verdict"], "require_approval");
+    assert_eq!(json["match"], true);
+}
+
+#[test]
+fn policy_test_hard_block_only_skips_project_assets() {
+    let cli = policy_test_cli_with_options(
+        "fixtures/infra-file-write.json",
+        ExpectedVerdict::Allow,
+        true,
+    );
+    let mut input = [].as_slice();
+    let mut output = Vec::new();
+    let mut error = Vec::new();
+
+    run_with_io(cli, &mut input, &mut output, &mut error).expect("policy test succeeds");
+
+    assert!(error.is_empty());
+    let json: Value = serde_json::from_slice(&output).expect("stdout is json");
+    assert_eq!(json["verdict"], "allow");
+    assert_eq!(json["match"], true);
+}
+
 fn policy_test_cli(fixture: &str, expect: ExpectedVerdict) -> Cli {
+    policy_test_cli_with_options(fixture, expect, false)
+}
+
+fn policy_test_cli_with_options(
+    fixture: &str,
+    expect: ExpectedVerdict,
+    hard_block_only: bool,
+) -> Cli {
     Cli {
         command: Commands::Policy {
             action: PolicyAction::Test {
                 fixture: repo_path(fixture),
                 expect,
                 policy: repo_path("policies/safe-defaults.yml"),
+                project: repo_path(".descry/project.yml"),
+                approvals: repo_path(".descry/memory/approvals.jsonl"),
+                behavior: repo_path(".descry/memory/behavior.json"),
+                hard_block_only,
             },
         },
     }

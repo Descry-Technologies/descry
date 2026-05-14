@@ -123,6 +123,8 @@ The bundled `policies/safe-defaults.yml` policy currently blocks:
 
 The defaults are intentionally conservative. Descry should block things that are obviously unsafe before it expands into broader ask/approve behavior.
 
+Policy layers are split on purpose: `policies/safe-defaults.yml` is the versioned hard-block policy pack (`schema_version: 1`, `pack_version: "0.1.0"`), while `.descry/project.yml` owns project asset and action defaults such as secrets, infra, source files, deploys, installs, and MCP writes. `descry policy test` evaluates fixtures through the full local engine by default; use `--hard-block-only` only when testing the policy pack matcher in isolation.
+
 ## Context Inference
 
 Descry does not require users to manually set a task for normal operation. Hook calls and demos build an inferred task envelope from branch names, recent files, harness context, project index data, and static asset rules. The engine then combines that task with the classified action and asset match.

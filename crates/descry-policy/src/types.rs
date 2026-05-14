@@ -42,6 +42,10 @@ pub struct HardBlock {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Policy {
+    #[serde(default = "default_schema_version")]
+    pub schema_version: u32,
+    #[serde(default = "default_pack_version")]
+    pub pack_version: String,
     pub project: Project,
     pub hard_blocks: Vec<HardBlock>,
     #[serde(skip)]
@@ -118,6 +122,14 @@ fn default_project_config() -> ProjectConfig {
     ProjectConfig {
         name: String::from("descry"),
     }
+}
+
+fn default_schema_version() -> u32 {
+    1
+}
+
+fn default_pack_version() -> String {
+    String::from("local")
 }
 
 fn default_asset_rules() -> Vec<AssetRule> {

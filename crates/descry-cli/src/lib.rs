@@ -202,6 +202,14 @@ pub enum PolicyAction {
         expect: ExpectedVerdict,
         #[arg(long, default_value = "policies/safe-defaults.yml")]
         policy: PathBuf,
+        #[arg(long, default_value = ".descry/project.yml")]
+        project: PathBuf,
+        #[arg(long, default_value = ".descry/memory/approvals.jsonl")]
+        approvals: PathBuf,
+        #[arg(long, default_value = ".descry/memory/behavior.json")]
+        behavior: PathBuf,
+        #[arg(long)]
+        hard_block_only: bool,
     },
 }
 

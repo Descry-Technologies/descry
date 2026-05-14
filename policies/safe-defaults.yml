@@ -1,3 +1,5 @@
+schema_version: 1
+pack_version: "0.1.0"
 project:
   name: descry
   version: "DG-003"
