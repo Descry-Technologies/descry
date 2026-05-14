@@ -4,7 +4,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use descry_core::{
     ActionClass, ActionContextPacket, AssetMatch, ClassifiedAction, Confidence, Decision,
-    DecisionInput, DecisionOutput, RiskScore, RuntimeContextConfig, TaskEnvelopeBuilder,
+    DecisionInput, DecisionOutput, RiskScore, RuntimeContextConfig, TaskEnvelope,
+    TaskEnvelopeBuilder, TaskSource,
 };
 use descry_policy::{Policy, ProjectPolicy};
 
@@ -296,17 +297,17 @@ fn asset_policy_decision(input: &DecisionInput, runtime: &EvaluationRuntime<'_>)
     }
 
     let context_match = task_context_match(input);
-    if asset.default_action == "allow_if_context_matches" && context_match.matches() {
+    if asset.default_action == "allow_if_context_matches"
+        && asset.sensitivity == "normal"
+        && context_match.score >= 60
+    {
         return DecisionOutput {
             decision: Decision::Allow,
             risk_score: RiskScore::try_from(20).expect("20 is a valid risk score"),
             confidence: Confidence::try_from(0.75).expect("0.75 is a valid confidence"),
             reason: format!(
-                "allowed: {} matches inferred task context \"{}\" via {} (asset: {})",
-                acp.action.target,
-                input.task.summary,
-                context_match.reason(),
-                asset.id
+                "allowed: {} matched task context score={} via {} (asset: {})",
+                acp.action.target, context_match.score, context_match.reason, asset.id
             ),
             conditions: Vec::new(),
         };
@@ -340,16 +341,14 @@ fn asset_policy_decision(input: &DecisionInput, runtime: &EvaluationRuntime<'_>)
                 approval_scope_hint(&acp.action.target)
             )],
         ),
-        "require_approval" | "allow_if_context_matches" => asset_require_approval_decision(
-            input,
-            runtime.behavior_path,
-            asset,
-            if asset.default_action == "allow_if_context_matches" {
-                "does not match inferred task context and requires scoped approval"
+        "require_approval" | "allow_if_context_matches" => {
+            let reason_suffix = if asset.default_action == "allow_if_context_matches" {
+                context_match.approval_reason()
             } else {
-                "requires scoped approval"
-            },
-        ),
+                String::from("requires scoped approval")
+            };
+            asset_require_approval_decision(input, runtime.behavior_path, asset, &reason_suffix)
+        }
         "allow" => allow_fallback("asset policy allows this target"),
         _ => allow_fallback("unknown asset default action falls back to allow"),
     }
@@ -571,33 +570,393 @@ fn apply_mcp_approval_override(
     }
 }
 
-struct TaskContextMatch {
-    paths: Vec<String>,
-    terms: Vec<String>,
+#[allow(dead_code)]
+struct TaskMatch {
+    score: u8,
+    exact_paths: Vec<String>,
+    near_paths: Vec<String>,
+    source_test_pairs: Vec<String>,
+    matched_terms: Vec<String>,
+    sources: Vec<TaskSource>,
+    reason: String,
 }
 
-impl TaskContextMatch {
-    fn matches(&self) -> bool {
-        !self.paths.is_empty() || !self.terms.is_empty()
-    }
-
-    fn reason(&self) -> String {
-        let mut parts = Vec::new();
-        if !self.paths.is_empty() {
-            parts.push(format!("paths {}", self.paths.join(", ")));
+impl TaskMatch {
+    fn approval_reason(&self) -> String {
+        if self.score == 0 {
+            String::from("does not match task context score=0 and requires scoped approval")
+        } else {
+            format!(
+                "has weak task context match score={} via {} and requires scoped approval",
+                self.score, self.reason
+            )
         }
-        if !self.terms.is_empty() {
-            parts.push(format!("terms {}", self.terms.join(", ")));
-        }
-        parts.join("; ")
     }
 }
 
-fn task_context_match(input: &DecisionInput) -> TaskContextMatch {
-    TaskContextMatch {
-        paths: input.task.matched_paths.clone(),
-        terms: input.task.matched_terms.clone(),
+fn task_context_match(input: &DecisionInput) -> TaskMatch {
+    score_task_context(&input.acp, &input.task)
+}
+
+fn score_task_context(acp: &ActionContextPacket, task: &TaskEnvelope) -> TaskMatch {
+    let target = normalized_path(&acp.action.target);
+    let target_tokens = useful_path_tokens(&target);
+    let mut score: u16 = 0;
+    let mut exact_paths = Vec::new();
+    let mut near_paths = Vec::new();
+    let mut source_test_pairs = Vec::new();
+    let mut matched_terms = Vec::new();
+    let mut sources = Vec::new();
+
+    let candidate_paths = task_candidate_paths(acp, task);
+    let mut has_exact_path = false;
+    let mut has_near_path = false;
+    let mut has_source_test_pair = false;
+    let mut has_stem_overlap = false;
+    let mut has_recent_proximity = false;
+
+    for candidate in &candidate_paths {
+        let candidate = normalized_path(candidate);
+        if candidate.is_empty() {
+            continue;
+        }
+
+        if candidate == target {
+            has_exact_path = true;
+            exact_paths.push(candidate.clone());
+            push_source(&mut sources, TaskSource::RecentFiles);
+        }
+
+        if same_directory(&candidate, &target) && candidate != target {
+            has_near_path = true;
+            near_paths.push(candidate.clone());
+            push_source(&mut sources, TaskSource::RecentFiles);
+        }
+
+        if source_test_counterpart(&candidate, &target) {
+            has_source_test_pair = true;
+            source_test_pairs.push(format!("{candidate} <-> {target}"));
+            push_source(&mut sources, TaskSource::RecentFiles);
+        }
+
+        if filename_stem_overlap(&candidate, &target) {
+            has_stem_overlap = true;
+            push_source(&mut sources, TaskSource::RecentFiles);
+        }
+
+        if recent_file_proximity(acp, &candidate, &target) {
+            has_recent_proximity = true;
+            push_source(&mut sources, TaskSource::RecentFiles);
+        }
     }
+
+    if has_exact_path {
+        score += 70;
+    }
+    if has_near_path {
+        score += 35;
+    }
+    if has_source_test_pair {
+        score += 45;
+    }
+    if has_stem_overlap {
+        score += 20;
+    }
+    if has_recent_proximity {
+        score += 20;
+    }
+
+    let branch_terms = useful_terms(&acp.context.branch);
+    let branch_overlap = matching_terms(branch_terms, &target_tokens, acp)
+        .into_iter()
+        .take(2)
+        .collect::<Vec<_>>();
+    if !branch_overlap.is_empty() {
+        score += 15 * branch_overlap.len() as u16;
+        matched_terms.extend(branch_overlap);
+        push_source(&mut sources, TaskSource::Branch);
+    }
+
+    let prompt_terms = prompt_task_terms(acp, task);
+    let prompt_overlap = matching_terms(prompt_terms, &target_tokens, acp)
+        .into_iter()
+        .take(3)
+        .collect::<Vec<_>>();
+    if !prompt_overlap.is_empty() {
+        score += 10 * prompt_overlap.len() as u16;
+        matched_terms.extend(prompt_overlap);
+        if acp.intent.active_task.is_some() {
+            push_source(&mut sources, TaskSource::ActiveTask);
+        }
+        if acp.intent.user_prompt.is_some() {
+            push_source(&mut sources, TaskSource::UserPrompt);
+        }
+    }
+
+    exact_paths.sort();
+    exact_paths.dedup();
+    near_paths.sort();
+    near_paths.dedup();
+    source_test_pairs.sort();
+    source_test_pairs.dedup();
+    matched_terms.sort();
+    matched_terms.dedup();
+    sources.sort_by_key(|source| format!("{source:?}"));
+    sources.dedup();
+
+    let score = score.min(100) as u8;
+    let reason = task_match_reason(
+        score,
+        &exact_paths,
+        &near_paths,
+        &source_test_pairs,
+        &matched_terms,
+        &sources,
+        has_stem_overlap,
+        has_recent_proximity,
+    );
+
+    TaskMatch {
+        score,
+        exact_paths,
+        near_paths,
+        source_test_pairs,
+        matched_terms,
+        sources,
+        reason,
+    }
+}
+
+fn task_candidate_paths(acp: &ActionContextPacket, task: &TaskEnvelope) -> Vec<String> {
+    let mut paths = Vec::new();
+    paths.extend(task.likely_paths.clone());
+    paths.extend(task.matched_paths.clone());
+    paths.extend(acp.context.recent_files.clone());
+    if let Some(active_task) = acp.intent.active_task.as_deref() {
+        paths.extend(path_like_terms(active_task));
+    }
+    if let Some(prompt) = acp.intent.user_prompt.as_deref() {
+        paths.extend(path_like_terms(prompt));
+    }
+    paths.retain(|path| !path.trim().is_empty());
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+fn normalized_path(path: &str) -> String {
+    path.trim().trim_start_matches("./").replace('\\', "/")
+}
+
+fn same_directory(left: &str, right: &str) -> bool {
+    let left_dir = left.rsplit_once('/').map(|(dir, _)| dir);
+    let right_dir = right.rsplit_once('/').map(|(dir, _)| dir);
+    left_dir.is_some() && left_dir == right_dir
+}
+
+fn source_test_counterpart(left: &str, right: &str) -> bool {
+    let left_kind = source_kind(left);
+    let right_kind = source_kind(right);
+    if !matches!(
+        (&left_kind, &right_kind),
+        (PathKind::Source, PathKind::Test) | (PathKind::Test, PathKind::Source)
+    ) {
+        return false;
+    }
+
+    let left_tokens = useful_path_tokens(left);
+    let right_tokens = useful_path_tokens(right);
+    left_tokens
+        .iter()
+        .filter(|term| right_tokens.contains(term))
+        .take(2)
+        .count()
+        >= 2
+}
+
+fn source_kind(path: &str) -> PathKind {
+    let path = path.to_ascii_lowercase();
+    if path.starts_with("tests/")
+        || path.contains("/tests/")
+        || path.contains(".test.")
+        || path.contains(".spec.")
+    {
+        PathKind::Test
+    } else if path.starts_with("src/") || path.contains("/src/") || path.starts_with("crates/") {
+        PathKind::Source
+    } else {
+        PathKind::Other
+    }
+}
+
+#[derive(Eq, PartialEq)]
+enum PathKind {
+    Source,
+    Test,
+    Other,
+}
+
+fn filename_stem_overlap(left: &str, right: &str) -> bool {
+    let left_tokens = filename_tokens(left);
+    let right_tokens = filename_tokens(right);
+    left_tokens.iter().any(|term| right_tokens.contains(term))
+}
+
+fn filename_tokens(path: &str) -> Vec<String> {
+    let file_name = path.rsplit('/').next().unwrap_or(path);
+    useful_terms(file_name)
+}
+
+fn useful_path_tokens(path: &str) -> Vec<String> {
+    useful_terms(path)
+}
+
+fn useful_terms(value: &str) -> Vec<String> {
+    let mut terms = value
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .filter(|term| term.len() >= 3)
+        .map(|term| term.to_ascii_lowercase())
+        .filter(|term| is_useful_term(term))
+        .collect::<Vec<_>>();
+    terms.sort();
+    terms.dedup();
+    terms
+}
+
+fn is_useful_term(term: &str) -> bool {
+    !matches!(
+        term,
+        "app"
+            | "fix"
+            | "lib"
+            | "mod"
+            | "src"
+            | "test"
+            | "tests"
+            | "spec"
+            | "file"
+            | "write"
+            | "update"
+            | "change"
+            | "unknown"
+    )
+}
+
+fn matching_terms(
+    candidate_terms: Vec<String>,
+    target_tokens: &[String],
+    acp: &ActionContextPacket,
+) -> Vec<String> {
+    let summary_tokens = useful_terms(acp.action.diff_summary.as_deref().unwrap_or_default());
+    let mut terms = candidate_terms
+        .into_iter()
+        .filter(|term| target_tokens.contains(term) || summary_tokens.contains(term))
+        .collect::<Vec<_>>();
+    terms.sort();
+    terms.dedup();
+    terms
+}
+
+fn prompt_task_terms(acp: &ActionContextPacket, task: &TaskEnvelope) -> Vec<String> {
+    let mut terms = Vec::new();
+    if let Some(active_task) = acp.intent.active_task.as_deref() {
+        terms.extend(useful_terms(active_task));
+    }
+    if let Some(prompt) = acp.intent.user_prompt.as_deref() {
+        terms.extend(useful_terms(prompt));
+    }
+    terms.extend(task.likely_terms.clone());
+    terms.extend(task.matched_terms.clone());
+    terms.extend(useful_terms(&task.summary));
+    terms.sort();
+    terms.dedup();
+    terms
+}
+
+fn path_like_terms(value: &str) -> Vec<String> {
+    value
+        .split_whitespace()
+        .map(|term| {
+            term.trim_matches(|character: char| {
+                !(character.is_ascii_alphanumeric()
+                    || matches!(character, '/' | '\\' | '.' | '_' | '-'))
+            })
+        })
+        .filter(|term| term.contains('/'))
+        .map(normalized_path)
+        .collect()
+}
+
+fn recent_file_proximity(acp: &ActionContextPacket, candidate: &str, target: &str) -> bool {
+    acp.context.recent_files.iter().any(|recent_file| {
+        let recent_file = normalized_path(recent_file);
+        recent_file == candidate
+            && (recent_file == target
+                || same_directory(&recent_file, target)
+                || source_test_counterpart(&recent_file, target))
+    })
+}
+
+fn push_source(sources: &mut Vec<TaskSource>, source: TaskSource) {
+    if !sources.contains(&source) {
+        sources.push(source);
+    }
+}
+
+fn task_match_reason(
+    score: u8,
+    exact_paths: &[String],
+    near_paths: &[String],
+    source_test_pairs: &[String],
+    matched_terms: &[String],
+    sources: &[TaskSource],
+    has_stem_overlap: bool,
+    has_recent_proximity: bool,
+) -> String {
+    if score == 0 {
+        return String::from("no usable task evidence");
+    }
+
+    let mut parts = Vec::new();
+    if !exact_paths.is_empty() {
+        parts.push(format!("exact path {}", exact_paths.join(", ")));
+    }
+    if !near_paths.is_empty() {
+        parts.push(format!("near path {}", near_paths.join(", ")));
+    }
+    if !source_test_pairs.is_empty() {
+        parts.push(format!(
+            "source/test counterpart {}",
+            source_test_pairs.join(", ")
+        ));
+    }
+    if has_stem_overlap {
+        parts.push(String::from("filename stem overlap"));
+    }
+    if has_recent_proximity {
+        parts.push(String::from("recent file proximity"));
+    }
+    if !matched_terms.is_empty() {
+        parts.push(format!("terms {}", matched_terms.join(", ")));
+    }
+    if !sources.is_empty() {
+        parts.push(format!("sources {}", source_names(sources).join(", ")));
+    }
+    parts.join("; ")
+}
+
+fn source_names(sources: &[TaskSource]) -> Vec<&'static str> {
+    sources
+        .iter()
+        .map(|source| match source {
+            TaskSource::ActiveTask => "active_task",
+            TaskSource::UserPrompt => "user_prompt",
+            TaskSource::Branch => "branch",
+            TaskSource::RecentFiles => "recent_files",
+            TaskSource::StaticPolicy => "static_policy",
+            TaskSource::Unknown => "unknown",
+        })
+        .collect()
 }
 
 fn match_legacy_asset(asset_policy_path: &Path, target: &str) -> Option<AssetMatch> {
@@ -782,25 +1141,23 @@ hard_blocks: []
     #[test]
     fn matching_source_task_allows_source_write() {
         let decision = evaluate_acp(
-            active_file_write("src/auth/session.rs", "fix session expiry"),
+            active_file_write("src/auth/session.rs", "fix src/auth/session.rs"),
             &ProjectPolicy::default(),
         );
 
         assert_eq!(decision.decision, Decision::Allow);
-        assert!(decision.reason.contains("matches inferred task context"));
+        assert!(decision.reason.contains("matched task context score="));
+        assert!(decision.reason.contains("exact path src/auth/session.rs"));
     }
 
     #[test]
     fn unrelated_source_task_requires_approval() {
-        let decision = evaluate_acp(
-            active_file_write("src/billing/invoice.rs", "fix session expiry"),
-            &ProjectPolicy::default(),
-        );
+        let mut acp = acp("file.write", "src/billing/invoice.rs");
+        acp.context.branch = String::from("fix/session-expiry");
+        let decision = evaluate_acp(acp, &ProjectPolicy::default());
 
         assert_eq!(decision.decision, Decision::RequireApproval);
-        assert!(decision
-            .reason
-            .contains("does not match inferred task context"));
+        assert!(decision.reason.contains("does not match task context"));
     }
 
     #[test]
@@ -812,7 +1169,8 @@ hard_blocks: []
         let decision = evaluate_acp(acp, &ProjectPolicy::default());
 
         assert_eq!(decision.decision, Decision::Allow);
-        assert!(decision.reason.contains("paths src/auth/session.ts"));
+        assert!(decision.reason.contains("score=100"));
+        assert!(decision.reason.contains("exact path src/auth/session.ts"));
     }
 
     #[test]
@@ -828,14 +1186,39 @@ hard_blocks: []
     }
 
     #[test]
-    fn user_prompt_contributes_task_terms() {
+    fn source_test_counterpart_allows_matching_source_write() {
+        let mut acp = acp("file.write", "src/auth/session.ts");
+        acp.context.recent_files = vec![String::from("tests/auth/session.test.ts")];
+
+        let decision = evaluate_acp(acp, &ProjectPolicy::default());
+
+        assert_eq!(decision.decision, Decision::Allow);
+        assert!(decision.reason.contains("source/test counterpart"));
+        assert!(decision.reason.contains("tests/auth/session.test.ts"));
+    }
+
+    #[test]
+    fn same_directory_plus_branch_allows_source_write() {
+        let mut acp = acp("file.write", "src/auth/session.ts");
+        acp.context.branch = String::from("fix/session-expiry");
+        acp.context.recent_files = vec![String::from("src/auth/token.ts")];
+
+        let decision = evaluate_acp(acp, &ProjectPolicy::default());
+
+        assert_eq!(decision.decision, Decision::Allow);
+        assert!(decision.reason.contains("near path src/auth/token.ts"));
+        assert!(decision.reason.contains("terms"));
+    }
+
+    #[test]
+    fn user_prompt_terms_require_approval_without_path_evidence() {
         let mut acp = acp("file.write", "src/auth/session.rs");
         acp.intent.user_prompt = Some(String::from("Fix session expiry handling"));
 
         let decision = evaluate_acp(acp, &ProjectPolicy::default());
 
-        assert_eq!(decision.decision, Decision::Allow);
-        assert!(decision.reason.contains("terms"));
+        assert_eq!(decision.decision, Decision::RequireApproval);
+        assert!(decision.reason.contains("weak task context match score="));
         assert!(decision.reason.contains("session"));
     }
 

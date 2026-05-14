@@ -123,7 +123,7 @@ fn evaluate_stdin_allows_source_write_from_inferred_context() {
     assert!(json["reason"]
         .as_str()
         .expect("reason is a string")
-        .contains("inferred task context"));
+        .contains("matched task context score="));
 }
 
 fn evaluate_command(root: &std::path::Path) -> Commands {
