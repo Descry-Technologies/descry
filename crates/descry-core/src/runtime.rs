@@ -1,8 +1,11 @@
+use std::fs::{self, OpenOptions};
+use std::io::{BufRead, BufReader, Write};
+use std::path::Path;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ActionContextPacket;
+use crate::{ActionContextPacket, DecisionOutput};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -207,4 +210,235 @@ impl ClassifiedAction {
 pub struct HarnessEvent {
     pub cwd: PathBuf,
     pub tool_name: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RuntimeContextConfig {
+    pub project_root: PathBuf,
+    pub context_path: PathBuf,
+    pub state_dir: PathBuf,
+    pub project_index_path: PathBuf,
+    pub project_policy_path: PathBuf,
+    pub policy_path: PathBuf,
+    pub approvals_path: PathBuf,
+    pub behavior_path: PathBuf,
+    pub audit_path: Option<PathBuf>,
+    pub repo_id_hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub legacy_asset_policy_path: Option<PathBuf>,
+}
+
+pub fn enrich_action_context(
+    mut acp: ActionContextPacket,
+    config: &RuntimeContextConfig,
+) -> std::io::Result<ActionContextPacket> {
+    if let Ok(index) = read_project_index_summary(&config.project_index_path) {
+        if acp.context.branch == "unknown" || acp.context.branch.trim().is_empty() {
+            if let Some(branch) = index.branch {
+                acp.context.branch = branch;
+            }
+        }
+        if acp.context.repo == "unknown" || acp.context.repo.trim().is_empty() {
+            if let Some(repo_name) = index.repo_name {
+                acp.context.repo = repo_name;
+            }
+        }
+    }
+
+    if let Some(active_task) = read_active_task(&config.context_path)? {
+        acp.intent.active_task = Some(active_task);
+    }
+
+    let mut recent_files = acp.context.recent_files.clone();
+    recent_files.extend(read_recent_file_targets(&config.state_dir)?);
+    recent_files.retain(|target| !target.trim().is_empty());
+    recent_files.sort();
+    recent_files.dedup();
+    acp.context.recent_files = recent_files;
+
+    Ok(acp)
+}
+
+pub fn append_runtime_session_event(
+    config: &RuntimeContextConfig,
+    session_id: Option<&str>,
+    acp: &ActionContextPacket,
+    decision: &DecisionOutput,
+) -> std::io::Result<()> {
+    let event = serde_json::json!({
+        "timestamp_unix": current_epoch_seconds()?,
+        "session_id": session_id,
+        "harness": acp.actor.name,
+        "user_prompt": acp.intent.user_prompt,
+        "action_type": acp.action.action_type,
+        "target": sanitized_event_target(&acp.action.action_type, &acp.action.target),
+        "decision": decision_name(decision),
+    });
+
+    append_bounded_jsonl(&config.state_dir.join("recent-actions.jsonl"), &event, 200)?;
+    append_bounded_jsonl(
+        &config
+            .state_dir
+            .join("sessions")
+            .join(format!("{}.jsonl", session_file_id(session_id))),
+        &event,
+        200,
+    )
+}
+
+fn read_active_task(path: &Path) -> std::io::Result<Option<String>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let body = fs::read_to_string(path)?;
+    Ok(body.lines().find_map(|line| {
+        line.strip_prefix("Active task:")
+            .map(str::trim)
+            .filter(|task| !task.is_empty())
+            .map(ToString::to_string)
+    }))
+}
+
+#[derive(Debug)]
+struct ProjectIndexSummary {
+    repo_name: Option<String>,
+    branch: Option<String>,
+}
+
+fn read_project_index_summary(path: &Path) -> std::io::Result<ProjectIndexSummary> {
+    let body = fs::read_to_string(path)?;
+    let value: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    Ok(ProjectIndexSummary {
+        repo_name: value
+            .get("repo_name")
+            .and_then(serde_json::Value::as_str)
+            .map(ToString::to_string),
+        branch: value
+            .get("branch")
+            .and_then(serde_json::Value::as_str)
+            .map(ToString::to_string),
+    })
+}
+
+fn read_recent_file_targets(state_dir: &Path) -> std::io::Result<Vec<String>> {
+    let path = state_dir.join("recent-actions.jsonl");
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let file = OpenOptions::new().read(true).open(path)?;
+    let mut targets = Vec::new();
+    for line in BufReader::new(file).lines() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let event: serde_json::Value = serde_json::from_str(&line)
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+        let action_type = event
+            .get("action_type")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        if !action_type.starts_with("file.") {
+            continue;
+        }
+        if let Some(target) = event.get("target").and_then(serde_json::Value::as_str) {
+            targets.push(target.to_string());
+        }
+    }
+    targets.reverse();
+    targets.truncate(20);
+    targets.reverse();
+    Ok(targets)
+}
+
+fn append_bounded_jsonl(
+    path: &Path,
+    event: &serde_json::Value,
+    max_records: usize,
+) -> std::io::Result<()> {
+    let mut records = read_jsonl_values(path).unwrap_or_default();
+    records.push(event.clone());
+    if records.len() > max_records {
+        records = records.split_off(records.len() - max_records);
+    }
+
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(path)?;
+    for record in records {
+        serde_json::to_writer(&mut file, &record)
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+        file.write_all(b"\n")?;
+    }
+    file.flush()
+}
+
+fn read_jsonl_values(path: &Path) -> std::io::Result<Vec<serde_json::Value>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let file = OpenOptions::new().read(true).open(path)?;
+    let mut records = Vec::new();
+    for line in BufReader::new(file).lines() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let event = serde_json::from_str(&line)
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+        records.push(event);
+    }
+    Ok(records)
+}
+
+fn current_epoch_seconds() -> std::io::Result<u64> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .map_err(std::io::Error::other)
+}
+
+fn sanitized_event_target(action_type: &str, target: &str) -> String {
+    match action_type {
+        "shell.exec" => String::from("<shell command omitted>"),
+        "mcp.call" => target.to_string(),
+        _ => target.to_string(),
+    }
+}
+
+fn decision_name(decision: &DecisionOutput) -> &'static str {
+    match decision.decision {
+        crate::Decision::Allow => "allow",
+        crate::Decision::AllowWithLog => "allow_with_log",
+        crate::Decision::Ask => "ask",
+        crate::Decision::RequireApproval => "require_approval",
+        crate::Decision::Block => "block",
+    }
+}
+
+fn session_file_id(session_id: Option<&str>) -> String {
+    let raw = session_id.unwrap_or("unknown");
+    let sanitized: String = raw
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if sanitized.is_empty() {
+        String::from("unknown")
+    } else {
+        sanitized
+    }
 }

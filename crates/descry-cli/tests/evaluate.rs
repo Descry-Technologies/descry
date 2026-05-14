@@ -3,8 +3,9 @@ use serde_json::Value;
 
 #[test]
 fn evaluate_stdin_outputs_allow_decision() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
     let cli = Cli {
-        command: evaluate_command(),
+        command: evaluate_command(tempdir.path()),
     };
     let mut input = include_str!("../../descry-core/tests/fixtures/spec_example.json").as_bytes();
     let mut output = Vec::new();
@@ -20,8 +21,9 @@ fn evaluate_stdin_outputs_allow_decision() {
 
 #[test]
 fn evaluate_stdin_blocks_rm_rf_home_fixture() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
     let cli = Cli {
-        command: evaluate_command(),
+        command: evaluate_command(tempdir.path()),
     };
     let mut input = include_str!("../../../fixtures/rm-rf-home.json").as_bytes();
     let mut output = Vec::new();
@@ -37,8 +39,9 @@ fn evaluate_stdin_blocks_rm_rf_home_fixture() {
 
 #[test]
 fn evaluate_stdin_blocks_force_push_main_after_branch() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
     let cli = Cli {
-        command: evaluate_command(),
+        command: evaluate_command(tempdir.path()),
     };
     let mut fixture: Value =
         serde_json::from_str(include_str!("../../../fixtures/force-push-main.json"))
@@ -59,8 +62,9 @@ fn evaluate_stdin_blocks_force_push_main_after_branch() {
 
 #[test]
 fn evaluate_stdin_blocks_secret_write_from_project_defaults() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
     let cli = Cli {
-        command: evaluate_command(),
+        command: evaluate_command(tempdir.path()),
     };
     let mut input = include_str!("../../../fixtures/secret-file-write.json").as_bytes();
     let mut output = Vec::new();
@@ -80,8 +84,9 @@ fn evaluate_stdin_blocks_secret_write_from_project_defaults() {
 
 #[test]
 fn evaluate_stdin_requires_approval_for_infra_write_from_project_defaults() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
     let cli = Cli {
-        command: evaluate_command(),
+        command: evaluate_command(tempdir.path()),
     };
     let mut input = include_str!("../../../fixtures/infra-file-write.json").as_bytes();
     let mut output = Vec::new();
@@ -101,8 +106,9 @@ fn evaluate_stdin_requires_approval_for_infra_write_from_project_defaults() {
 
 #[test]
 fn evaluate_stdin_allows_source_write_from_inferred_context() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
     let cli = Cli {
-        command: evaluate_command(),
+        command: evaluate_command(tempdir.path()),
     };
     let mut input = include_str!("../../../fixtures/inferred-source-file-write.json").as_bytes();
     let mut output = Vec::new();
@@ -120,12 +126,27 @@ fn evaluate_stdin_allows_source_write_from_inferred_context() {
         .contains("inferred task context"));
 }
 
-fn evaluate_command() -> Commands {
+fn evaluate_command(root: &std::path::Path) -> Commands {
     Commands::Evaluate {
         stdin: true,
-        policy: "policies/safe-defaults.yml".into(),
-        project: ".descry/project.yml".into(),
-        approvals: ".descry/memory/approvals.jsonl".into(),
-        behavior: ".descry/memory/behavior.json".into(),
+        policy: workspace_root().join("policies/safe-defaults.yml"),
+        project: root.join(".descry/project.yml"),
+        project_root: root.to_path_buf(),
+        context: root.join(".descry/context.md"),
+        state: root.join(".descry/state"),
+        project_index: root.join(".descry/state/project-index.json"),
+        approvals: root.join(".descry/memory/approvals.jsonl"),
+        behavior: root.join(".descry/memory/behavior.json"),
+        audit: None,
+        no_context: false,
     }
+}
+
+fn workspace_root() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("cli crate has workspace parent")
+        .parent()
+        .expect("crates dir has workspace parent")
+        .to_path_buf()
 }

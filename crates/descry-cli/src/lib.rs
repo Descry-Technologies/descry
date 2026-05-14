@@ -59,10 +59,22 @@ pub enum Commands {
         policy: PathBuf,
         #[arg(long, default_value = ".descry/project.yml")]
         project: PathBuf,
+        #[arg(long, default_value = ".")]
+        project_root: PathBuf,
+        #[arg(long, default_value = ".descry/context.md")]
+        context: PathBuf,
+        #[arg(long, default_value = ".descry/state")]
+        state: PathBuf,
+        #[arg(long, default_value = ".descry/state/project-index.json")]
+        project_index: PathBuf,
         #[arg(long, default_value = ".descry/memory/approvals.jsonl")]
         approvals: PathBuf,
         #[arg(long, default_value = ".descry/memory/behavior.json")]
         behavior: PathBuf,
+        #[arg(long)]
+        audit: Option<PathBuf>,
+        #[arg(long)]
+        no_context: bool,
     },
     Context {
         #[command(subcommand)]
@@ -452,15 +464,27 @@ pub fn run_with_io(
             stdin,
             policy,
             project,
+            project_root,
+            context,
+            state,
+            project_index,
             approvals,
             behavior,
+            audit,
+            no_context,
         } => commands::evaluate::run(
             stdin,
             commands::evaluate::EvaluateConfig {
                 policy,
                 project,
+                project_root,
+                context,
+                state,
+                project_index,
                 approvals,
                 behavior,
+                audit,
+                no_context,
             },
             input,
             output,

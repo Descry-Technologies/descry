@@ -1,9 +1,10 @@
+use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use descry_core::{
     ActionClass, ActionContextPacket, AssetMatch, ClassifiedAction, Confidence, Decision,
-    DecisionInput, DecisionOutput, RiskScore, TaskEnvelope,
+    DecisionInput, DecisionOutput, RiskScore, RuntimeContextConfig, TaskEnvelope,
 };
 use descry_policy::{Policy, ProjectPolicy};
 
@@ -12,6 +13,77 @@ pub struct EvaluationRuntime<'a> {
     pub project_config: &'a ProjectPolicy,
     pub approvals_path: &'a Path,
     pub behavior_path: &'a Path,
+}
+
+#[derive(Clone, Debug)]
+pub struct EvaluatedAction {
+    pub decision: DecisionOutput,
+    pub decision_input: DecisionInput,
+}
+
+pub fn evaluate_action(
+    acp: ActionContextPacket,
+    config: &RuntimeContextConfig,
+    session_id: Option<&str>,
+) -> Result<EvaluatedAction, String> {
+    let acp = descry_core::enrich_action_context(acp, config)
+        .map_err(|error| format!("failed to enrich runtime context: {error}"))?;
+    let policy = load_policy(&config.policy_path)?;
+    let project_config = load_project_policy(&config.project_policy_path)?;
+    let decision_input = match config.legacy_asset_policy_path.as_deref() {
+        Some(asset_policy_path) => {
+            build_decision_input_with_legacy_asset_policy(acp.clone(), asset_policy_path)
+        }
+        None => build_decision_input(acp.clone()),
+    };
+    let decision = evaluate(
+        decision_input.clone(),
+        EvaluationRuntime {
+            policy: &policy,
+            project_config: &project_config,
+            approvals_path: &config.approvals_path,
+            behavior_path: &config.behavior_path,
+        },
+    );
+
+    record_behavior(&config.behavior_path, &acp)
+        .map_err(|error| format!("failed to record behavior: {error}"))?;
+    descry_core::append_runtime_session_event(config, session_id, &acp, &decision)
+        .map_err(|error| format!("failed to append session event: {error}"))?;
+
+    Ok(EvaluatedAction {
+        decision,
+        decision_input,
+    })
+}
+
+fn load_policy(path: &Path) -> Result<Policy, String> {
+    let body = fs::read_to_string(path)
+        .map_err(|error| format!("failed to read policy {}: {error}", path.display()))?;
+    Policy::load_yaml(&body).map_err(|error| format!("failed to load policy: {error}"))
+}
+
+fn load_project_policy(path: &Path) -> Result<ProjectPolicy, String> {
+    if !path.exists() {
+        return Ok(ProjectPolicy::default());
+    }
+
+    let body = fs::read_to_string(path)
+        .map_err(|error| format!("failed to read project policy {}: {error}", path.display()))?;
+    ProjectPolicy::load_yaml(&body)
+        .map_err(|error| format!("failed to load project policy {}: {error}", path.display()))
+}
+
+fn record_behavior(behavior_path: &Path, acp: &ActionContextPacket) -> Result<(), String> {
+    descry_memory::record_behavior(
+        behavior_path,
+        &acp.actor.name,
+        &acp.action.action_type,
+        &acp.action.target,
+        current_epoch_seconds(),
+    )
+    .map(|_| ())
+    .map_err(|error| error.to_string())
 }
 
 pub fn evaluate(input: DecisionInput, runtime: EvaluationRuntime<'_>) -> DecisionOutput {

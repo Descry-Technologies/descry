@@ -2,7 +2,6 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use descry_adapters::claude::{
     claude_output, normalize_pretooluse as normalize_claude_pretooluse, ClaudeHookInput,
@@ -13,9 +12,8 @@ use descry_adapters::cursor::{
     CursorMcpHookInput, CursorShellHookInput,
 };
 use descry_audit::AuditChain;
-use descry_context::SessionEvent;
-use descry_core::{ActionContextPacket, Decision, DecisionOutput};
-use descry_engine::{build_decision_input_with_legacy_asset_policy, evaluate, EvaluationRuntime};
+use descry_core::{ActionContextPacket, Decision, DecisionOutput, RuntimeContextConfig};
+use descry_engine::evaluate_action;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
@@ -502,103 +500,40 @@ fn host_reason(decision: &DecisionOutput) -> String {
 }
 
 fn evaluate_and_record(
-    mut acp: ActionContextPacket,
+    acp: ActionContextPacket,
     runtime: HookRuntimeConfig,
 ) -> Result<DecisionOutput> {
-    enrich_acp_context(&mut acp, &runtime.state)?;
-    acp.intent.active_task = crate::commands::task::read_active_task(&runtime.context)?;
-    let policy = crate::commands::policy_source::load_policy(&runtime.policy)?.policy;
-    let project_config = crate::commands::evaluate::load_project_policy(&runtime.project)?;
-    let decision_input =
-        build_decision_input_with_legacy_asset_policy(acp.clone(), &runtime.asset_policy);
-    let decision = evaluate(
-        decision_input,
-        EvaluationRuntime {
-            policy: &policy,
-            project_config: &project_config,
-            approvals_path: &runtime.approvals,
-            behavior_path: &runtime.behavior,
-        },
-    );
-    append_audit(&runtime.audit, &runtime.repo_id_hash, &acp, &decision)?;
-    append_context_event(
-        &runtime.state,
-        runtime.session_id.as_deref(),
-        &acp,
-        &decision,
-    )?;
-    record_behavior(&runtime.behavior, &acp)?;
-    Ok(decision)
-}
-
-fn enrich_acp_context(acp: &mut ActionContextPacket, state_dir: &Path) -> Result<()> {
-    if let Ok(index) = descry_context::read_project_index(&state_dir.join("project-index.json")) {
-        if acp.context.branch == "unknown" || acp.context.branch.trim().is_empty() {
-            if let Some(branch) = index.branch {
-                acp.context.branch = branch;
-            }
-        }
-        if acp.context.repo == "unknown" || acp.context.repo.trim().is_empty() {
-            acp.context.repo = index.repo_name;
-        }
-    }
-
-    if acp.context.recent_files.is_empty() {
-        let mut recent_files = descry_context::read_recent_events(state_dir)
-            .unwrap_or_default()
-            .into_iter()
-            .rev()
-            .filter(|event| event.action_type.starts_with("file."))
-            .map(|event| event.target)
-            .filter(|target| !target.trim().is_empty())
-            .take(20)
-            .collect::<Vec<_>>();
-        recent_files.reverse();
-        recent_files.sort();
-        recent_files.dedup();
-        acp.context.recent_files = recent_files;
-    }
-
-    Ok(())
-}
-
-fn record_behavior(behavior_path: &Path, acp: &ActionContextPacket) -> Result<()> {
-    let now = current_epoch_seconds()?;
-    descry_memory::record_behavior(
-        behavior_path,
-        &acp.actor.name,
-        &acp.action.action_type,
-        &acp.action.target,
-        now,
-    )
-    .map_err(|error| CliError::new(error.to_string(), 1))?;
-    Ok(())
-}
-
-fn append_context_event(
-    state_dir: &Path,
-    session_id: Option<&str>,
-    acp: &ActionContextPacket,
-    decision: &DecisionOutput,
-) -> Result<()> {
-    let event = SessionEvent {
-        timestamp_unix: current_epoch_seconds()?,
-        session_id: session_id.map(ToString::to_string),
-        harness: acp.actor.name.clone(),
-        user_prompt: None,
-        action_type: acp.action.action_type.clone(),
-        target: descry_context::sanitized_event_target(&acp.action.action_type, &acp.action.target),
-        decision: Some(decision_name(&decision.decision).to_string()),
+    let project_index_path = runtime.state.join("project-index.json");
+    let config = RuntimeContextConfig {
+        project_root: project_root_from_policy_path(&runtime.project),
+        context_path: runtime.context,
+        state_dir: runtime.state,
+        project_index_path,
+        project_policy_path: runtime.project,
+        policy_path: runtime.policy,
+        approvals_path: runtime.approvals,
+        behavior_path: runtime.behavior,
+        audit_path: Some(runtime.audit.clone()),
+        repo_id_hash: runtime.repo_id_hash.clone(),
+        legacy_asset_policy_path: Some(runtime.asset_policy),
     };
-    descry_context::append_session_event(state_dir, &event)
-        .map_err(|error| CliError::new(error.to_string(), 1))
+    let evaluated = evaluate_action(acp, &config, runtime.session_id.as_deref())
+        .map_err(|error| CliError::new(error, 1))?;
+    append_audit(
+        &runtime.audit,
+        &runtime.repo_id_hash,
+        &evaluated.decision_input.acp,
+        &evaluated.decision,
+    )?;
+    Ok(evaluated.decision)
 }
 
-fn current_epoch_seconds() -> Result<u64> {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .map_err(|error| CliError::new(error.to_string(), 1))
+fn project_root_from_policy_path(project_policy_path: &Path) -> PathBuf {
+    project_policy_path
+        .parent()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 fn append_audit(

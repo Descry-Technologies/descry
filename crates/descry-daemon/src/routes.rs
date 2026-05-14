@@ -1,18 +1,16 @@
-use std::path::Path;
+use std::path::PathBuf;
 
 use axum::body::Bytes;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use descry_core::ActionContextPacket;
-use descry_engine::{build_decision_input, evaluate, EvaluationRuntime};
-use descry_policy::{Policy, ProjectPolicy};
+use descry_core::{ActionContextPacket, RuntimeContextConfig};
+use descry_engine::evaluate_action;
 use serde_json::json;
 
-const BUILT_IN_SAFE_DEFAULTS: &str = include_str!("../../../policies/safe-defaults.yml");
+const DEFAULT_POLICY: &str = "policies/safe-defaults.yml";
 const DEFAULT_PROJECT_POLICY: &str = ".descry/project.yml";
-const DEFAULT_APPROVALS: &str = ".descry/memory/approvals.jsonl";
-const DEFAULT_BEHAVIOR: &str = ".descry/memory/behavior.json";
+const DEFAULT_CONTEXT: &str = ".descry/context.md";
 
 pub async fn pretooluse(body: Bytes) -> Response {
     match serde_json::from_slice::<ActionContextPacket>(&body) {
@@ -33,31 +31,34 @@ pub async fn pretooluse(body: Bytes) -> Response {
 }
 
 fn evaluate_pretooluse(acp: ActionContextPacket) -> Result<descry_core::DecisionOutput, String> {
-    let policy = Policy::load_yaml(BUILT_IN_SAFE_DEFAULTS)
-        .map_err(|error| format!("failed to load built-in policy: {error}"))?;
-    let project_config = load_project_policy(Path::new(DEFAULT_PROJECT_POLICY))?;
-    let decision_input = build_decision_input(acp);
-
-    Ok(evaluate(
-        decision_input,
-        EvaluationRuntime {
-            policy: &policy,
-            project_config: &project_config,
-            approvals_path: Path::new(DEFAULT_APPROVALS),
-            behavior_path: Path::new(DEFAULT_BEHAVIOR),
-        },
-    ))
+    let project_root = std::env::current_dir()
+        .map_err(|error| format!("failed to resolve daemon project root: {error}"))?;
+    let state_dir = std::env::var_os("DESCRY_DAEMON_STATE_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join("descry-daemon-state"));
+    let config = RuntimeContextConfig {
+        project_root,
+        context_path: PathBuf::from(DEFAULT_CONTEXT),
+        project_index_path: state_dir.join("project-index.json"),
+        approvals_path: state_dir.join("approvals.jsonl"),
+        behavior_path: state_dir.join("behavior.json"),
+        state_dir,
+        project_policy_path: PathBuf::from(DEFAULT_PROJECT_POLICY),
+        policy_path: workspace_root().join(DEFAULT_POLICY),
+        audit_path: None,
+        repo_id_hash: String::from("descry-daemon"),
+        legacy_asset_policy_path: None,
+    };
+    evaluate_action(acp, &config, None).map(|evaluated| evaluated.decision)
 }
 
-fn load_project_policy(path: &Path) -> Result<ProjectPolicy, String> {
-    if !path.exists() {
-        return Ok(ProjectPolicy::default());
-    }
-
-    let body = std::fs::read_to_string(path)
-        .map_err(|error| format!("failed to read project policy {}: {error}", path.display()))?;
-    ProjectPolicy::load_yaml(&body)
-        .map_err(|error| format!("failed to load project policy {}: {error}", path.display()))
+fn workspace_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("daemon crate has workspace parent")
+        .parent()
+        .expect("crates dir has workspace parent")
+        .to_path_buf()
 }
 
 #[cfg(test)]
