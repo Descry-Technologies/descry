@@ -280,30 +280,44 @@ pub enum DemoAction {
     InTaskEdit {
         #[arg(long, default_value = "policies/safe-defaults.yml")]
         policy: PathBuf,
+        #[arg(long)]
+        json: bool,
     },
     Pocketos {
         #[arg(long, default_value = "policies/safe-defaults.yml")]
         policy: PathBuf,
+        #[arg(long)]
+        json: bool,
     },
     RmRf {
         #[arg(long, default_value = "policies/safe-defaults.yml")]
         policy: PathBuf,
+        #[arg(long)]
+        json: bool,
     },
     SecretAccess {
         #[arg(long, default_value = "policies/safe-defaults.yml")]
         policy: PathBuf,
+        #[arg(long)]
+        json: bool,
     },
     OffTaskEdit {
         #[arg(long, default_value = "policies/safe-defaults.yml")]
         policy: PathBuf,
+        #[arg(long)]
+        json: bool,
     },
     McpPoison {
         #[arg(long, default_value = "policies/safe-defaults.yml")]
         policy: PathBuf,
+        #[arg(long)]
+        json: bool,
     },
     ProdDelete {
         #[arg(long, default_value = "policies/safe-defaults.yml")]
         policy: PathBuf,
+        #[arg(long)]
+        json: bool,
     },
 }
 

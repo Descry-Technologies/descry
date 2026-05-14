@@ -86,17 +86,19 @@ cargo install --locked --path crates/descry-cli
 Expected demo shape:
 
 ```text
-descry demo off-task-edit
+descry demo pocketos
 loaded policies/safe-defaults.yml
-prompt/context: fix login session expiry while agent edits deployment workflow
-inferred task: fix/session-expiry
-proposed action: .github/workflows/deploy.yml
-classified action: FileWrite
-asset match: infra sensitivity=high default_action=require_approval
-decision: require_approval
-reason: high write target .github/workflows/deploy.yml requires scoped approval (asset: infra)
-without Descry: deployment workflow changes without an explicit approval checkpoint
+prompt/context: fix staging 401 after agent discovers Railway credentials
+inferred task: fix staging 401
+proposed action: curl -X DELETE https://api.railway.app/v1/volumes/v_prod_pocketos
+classified action: CloudDelete
+asset match: none
+decision: block
+reason: destructive hosted control-plane operation (rule: control-plane-delete)
+without Descry: production volume deleted and backups on the same volume vanish
 ```
+
+Demos run with isolated temporary approval and behavior memory, so local `.descry/memory` state cannot change their result. Add `--json` to any demo for machine-readable trace output.
 
 For a real checkout, run `descry init --all` from the project root. It creates `.descry/project.yml`, `.descry/state/`, `.descry/memory/`, and `.descry/state/project-index.json`, then installs project-local Claude, Codex, Cursor, and Git hooks. Use plain `descry init` when you want project files without hook installation.
 

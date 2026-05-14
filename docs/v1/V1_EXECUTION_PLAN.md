@@ -108,7 +108,7 @@ cargo test --workspace
 | DG-V1-110 | complete 2026-05-14 | Make approvals typed, validated, and actually enforced | DG-V1-120 |
 | DG-V1-120 | complete 2026-05-14 | Harden host hook contracts and messages | DG-V1-130 |
 | DG-V1-130 | complete 2026-05-14 | Complete audit/memory semantics | DG-V1-140 |
-| DG-V1-140 | pending | Make demos reproducible launch tests | DG-V1-150 |
+| DG-V1-140 | complete 2026-05-14 | Make demos reproducible launch tests | DG-V1-150 |
 | DG-V1-150 | pending | Add fixture manifest and false-positive gate | DG-V1-160 |
 | DG-V1-160 | pending | Decide daemon V1 surface and enforce parity or hide it | DG-V1-170 |
 | DG-V1-170 | pending | Align public docs, README, roadmap, and website | release |

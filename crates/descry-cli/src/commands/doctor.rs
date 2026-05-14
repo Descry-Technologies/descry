@@ -466,42 +466,49 @@ fn check_launch_demos(policy_path: &Path) -> Vec<DoctorCheck> {
             "demo.in_task_edit",
             DemoAction::InTaskEdit {
                 policy: policy_path.to_path_buf(),
+                json: false,
             },
         ),
         (
             "demo.off_task_edit",
             DemoAction::OffTaskEdit {
                 policy: policy_path.to_path_buf(),
+                json: false,
             },
         ),
         (
             "demo.secret_access",
             DemoAction::SecretAccess {
                 policy: policy_path.to_path_buf(),
+                json: false,
             },
         ),
         (
             "demo.rm_rf",
             DemoAction::RmRf {
                 policy: policy_path.to_path_buf(),
+                json: false,
             },
         ),
         (
             "demo.mcp_poison",
             DemoAction::McpPoison {
                 policy: policy_path.to_path_buf(),
+                json: false,
             },
         ),
         (
             "demo.prod_delete",
             DemoAction::ProdDelete {
                 policy: policy_path.to_path_buf(),
+                json: false,
             },
         ),
         (
             "demo.pocketos",
             DemoAction::Pocketos {
                 policy: policy_path.to_path_buf(),
+                json: false,
             },
         ),
     ]

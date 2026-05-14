@@ -1,4 +1,5 @@
 use descry_cli::{run_with_io, Cli, Commands, DemoAction};
+use serde_json::Value;
 
 #[test]
 fn launch_demos_print_required_trace_fields() {
@@ -44,7 +45,7 @@ fn demo_in_task_edit_allows_matching_source_change() {
     let output = run_demo(demo_in_task_edit());
 
     assert!(output.contains("asset match: source"));
-    assert!(output.contains("allowed: src/auth/session.ts matches inferred task context"));
+    assert!(output.contains("allowed: src/auth/session.ts matched task context score="));
 }
 
 #[test]
@@ -61,6 +62,24 @@ fn demo_off_task_edit_requires_approval() {
 
     assert!(output.contains("asset match: infra"));
     assert!(output.contains("requires scoped approval"));
+}
+
+#[test]
+fn demo_json_outputs_required_trace_fields() {
+    let output = run_demo(DemoAction::Pocketos {
+        policy: policy_path(),
+        json: true,
+    });
+    let json: Value = serde_json::from_str(&output).expect("demo output is json");
+
+    assert_eq!(json["demo"], "pocketos");
+    assert_eq!(json["decision"], "block");
+    assert_eq!(json["classified_action"], "CloudDelete");
+    assert!(json["reason"]
+        .as_str()
+        .expect("reason is string")
+        .contains("control-plane"));
+    assert!(json["without_descry"].as_str().is_some());
 }
 
 fn run_demo(action: DemoAction) -> String {
@@ -80,42 +99,49 @@ fn run_demo(action: DemoAction) -> String {
 fn demo_in_task_edit() -> DemoAction {
     DemoAction::InTaskEdit {
         policy: policy_path(),
+        json: false,
     }
 }
 
 fn demo_pocketos() -> DemoAction {
     DemoAction::Pocketos {
         policy: policy_path(),
+        json: false,
     }
 }
 
 fn demo_rm_rf() -> DemoAction {
     DemoAction::RmRf {
         policy: policy_path(),
+        json: false,
     }
 }
 
 fn demo_secret_access() -> DemoAction {
     DemoAction::SecretAccess {
         policy: policy_path(),
+        json: false,
     }
 }
 
 fn demo_off_task_edit() -> DemoAction {
     DemoAction::OffTaskEdit {
         policy: policy_path(),
+        json: false,
     }
 }
 
 fn demo_mcp_poison() -> DemoAction {
     DemoAction::McpPoison {
         policy: policy_path(),
+        json: false,
     }
 }
 
 fn demo_prod_delete() -> DemoAction {
     DemoAction::ProdDelete {
         policy: policy_path(),
+        json: false,
     }
 }
 

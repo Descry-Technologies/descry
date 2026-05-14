@@ -1,23 +1,32 @@
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use descry_core::acp::{Action, Actor, Asset, BlastRadius, Context, Intent};
 use descry_core::{ActionContextPacket, AssetMatch, Decision};
 use descry_engine::{build_decision_input, evaluate, EvaluationRuntime};
 use descry_policy::ProjectPolicy;
+use serde_json::json;
 
 use crate::commands::policy_source::load_policy;
 use crate::{CliError, DemoAction, Result};
 
 pub fn run(action: DemoAction, output: &mut dyn Write) -> Result<()> {
     match action {
-        DemoAction::InTaskEdit { policy } => run_trace(in_task_edit_demo(policy), output),
-        DemoAction::Pocketos { policy } => run_trace(pocketos_demo(policy), output),
-        DemoAction::RmRf { policy } => run_trace(rm_rf_demo(policy), output),
-        DemoAction::SecretAccess { policy } => run_trace(secret_access_demo(policy), output),
-        DemoAction::OffTaskEdit { policy } => run_trace(off_task_edit_demo(policy), output),
-        DemoAction::McpPoison { policy } => run_trace(mcp_poison_demo(policy), output),
-        DemoAction::ProdDelete { policy } => run_trace(prod_delete_demo(policy), output),
+        DemoAction::InTaskEdit { policy, json } => {
+            run_trace(in_task_edit_demo(policy), json, output)
+        }
+        DemoAction::Pocketos { policy, json } => run_trace(pocketos_demo(policy), json, output),
+        DemoAction::RmRf { policy, json } => run_trace(rm_rf_demo(policy), json, output),
+        DemoAction::SecretAccess { policy, json } => {
+            run_trace(secret_access_demo(policy), json, output)
+        }
+        DemoAction::OffTaskEdit { policy, json } => {
+            run_trace(off_task_edit_demo(policy), json, output)
+        }
+        DemoAction::McpPoison { policy, json } => run_trace(mcp_poison_demo(policy), json, output),
+        DemoAction::ProdDelete { policy, json } => {
+            run_trace(prod_delete_demo(policy), json, output)
+        }
     }
 }
 
@@ -30,32 +39,56 @@ struct DemoTrace {
     expected_decision: Decision,
 }
 
-fn run_trace(trace: DemoTrace, output: &mut dyn Write) -> Result<()> {
+fn run_trace(trace: DemoTrace, json_output: bool, output: &mut dyn Write) -> Result<()> {
     let loaded_policy = load_policy(&trace.policy)?;
     let project_policy = ProjectPolicy::default();
     let asset = project_policy.match_asset(&trace.acp.action.target);
     let mut input = build_decision_input(trace.acp.clone());
     input.asset = asset.clone();
+    let (approvals_path, behavior_path) = isolated_demo_memory_paths(trace.name);
     let decision = evaluate(
         input.clone(),
         EvaluationRuntime {
             policy: &loaded_policy.policy,
             project_config: &project_policy,
-            approvals_path: Path::new(".descry/memory/approvals.jsonl"),
-            behavior_path: Path::new(".descry/memory/behavior.json"),
+            approvals_path: &approvals_path,
+            behavior_path: &behavior_path,
         },
     );
+    let policy_source = loaded_policy.source.detail();
+    let classified_action = format!("{:?}", input.action.class);
+    let asset_match = asset_match_text(asset.as_ref());
+    let decision_text = decision_name(&decision.decision);
 
-    writeln!(output, "descry demo {}", trace.name)?;
-    writeln!(output, "{}", loaded_policy.source.detail())?;
-    writeln!(output, "prompt/context: {}", trace.prompt_context)?;
-    writeln!(output, "inferred task: {}", input.task.summary)?;
-    writeln!(output, "proposed action: {}", trace.acp.action.target)?;
-    writeln!(output, "classified action: {:?}", input.action.class)?;
-    writeln!(output, "asset match: {}", asset_match_text(asset.as_ref()))?;
-    writeln!(output, "decision: {}", decision_name(&decision.decision))?;
-    writeln!(output, "reason: {}", decision.reason)?;
-    writeln!(output, "without Descry: {}", trace.without_descry)?;
+    if json_output {
+        writeln!(
+            output,
+            "{}",
+            json!({
+                "demo": trace.name,
+                "policy_source": policy_source,
+                "prompt_context": trace.prompt_context,
+                "inferred_task": input.task.summary,
+                "proposed_action": trace.acp.action.target,
+                "classified_action": classified_action,
+                "asset_match": asset_match,
+                "decision": decision_text,
+                "reason": decision.reason,
+                "without_descry": trace.without_descry
+            })
+        )?;
+    } else {
+        writeln!(output, "descry demo {}", trace.name)?;
+        writeln!(output, "{policy_source}")?;
+        writeln!(output, "prompt/context: {}", trace.prompt_context)?;
+        writeln!(output, "inferred task: {}", input.task.summary)?;
+        writeln!(output, "proposed action: {}", trace.acp.action.target)?;
+        writeln!(output, "classified action: {classified_action}")?;
+        writeln!(output, "asset match: {asset_match}")?;
+        writeln!(output, "decision: {decision_text}")?;
+        writeln!(output, "reason: {}", decision.reason)?;
+        writeln!(output, "without Descry: {}", trace.without_descry)?;
+    }
 
     if decision.decision == trace.expected_decision {
         Ok(())
@@ -70,6 +103,16 @@ fn run_trace(trace: DemoTrace, output: &mut dyn Write) -> Result<()> {
             1,
         ))
     }
+}
+
+fn isolated_demo_memory_paths(name: &str) -> (PathBuf, PathBuf) {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let root =
+        std::env::temp_dir().join(format!("descry-demo-{name}-{}-{nanos}", std::process::id()));
+    (root.join("approvals.jsonl"), root.join("behavior.json"))
 }
 
 fn in_task_edit_demo(policy: PathBuf) -> DemoTrace {
