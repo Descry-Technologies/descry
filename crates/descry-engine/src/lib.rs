@@ -37,14 +37,16 @@ pub fn evaluate_action(
         }
         None => build_decision_input(acp.clone()),
     };
-    let decision = evaluate(
+    let runtime = EvaluationRuntime {
+        policy: &policy,
+        project_config: &project_config,
+        approvals_path: &config.approvals_path,
+        behavior_path: &config.behavior_path,
+    };
+    let decision = evaluate_with_legacy_asset_policy(
         decision_input.clone(),
-        EvaluationRuntime {
-            policy: &policy,
-            project_config: &project_config,
-            approvals_path: &config.approvals_path,
-            behavior_path: &config.behavior_path,
-        },
+        runtime,
+        config.legacy_asset_policy_path.as_deref(),
     );
 
     record_behavior(&config.behavior_path, &acp)
@@ -88,21 +90,37 @@ fn record_behavior(behavior_path: &Path, acp: &ActionContextPacket) -> Result<()
 }
 
 pub fn evaluate(input: DecisionInput, runtime: EvaluationRuntime<'_>) -> DecisionOutput {
+    evaluate_targets(input, runtime, None)
+}
+
+fn evaluate_with_legacy_asset_policy(
+    input: DecisionInput,
+    runtime: EvaluationRuntime<'_>,
+    legacy_asset_policy_path: Option<&Path>,
+) -> DecisionOutput {
+    evaluate_targets(input, runtime, legacy_asset_policy_path)
+}
+
+fn evaluate_targets(
+    input: DecisionInput,
+    runtime: EvaluationRuntime<'_>,
+    legacy_asset_policy_path: Option<&Path>,
+) -> DecisionOutput {
     let targets = action_targets(&input.acp);
     let mut strongest_decision = None;
-    let legacy_asset = input.asset.clone();
 
     for target in targets {
         let mut candidate_input = input.clone();
         candidate_input.acp.action.target = target;
         candidate_input.action = classify_action(&candidate_input.acp);
-        candidate_input.asset = legacy_asset.clone().or_else(|| {
-            runtime
-                .project_config
-                .match_asset(&candidate_input.acp.action.target)
-        });
-        candidate_input.task.matched_asset =
-            candidate_input.asset.as_ref().map(|asset| asset.id.clone());
+        candidate_input.asset = match_runtime_asset(
+            &candidate_input.acp.action.target,
+            &runtime,
+            legacy_asset_policy_path,
+        );
+        candidate_input.task = TaskEnvelopeBuilder::new(&candidate_input.acp)
+            .matched_asset(candidate_input.asset.as_ref().map(|asset| asset.id.clone()))
+            .build();
 
         let policy_decision = runtime.policy.evaluate(&candidate_input.acp);
         let decision = apply_decision_layers(policy_decision, &candidate_input, &runtime);
@@ -143,6 +161,16 @@ fn build_decision_input_with_asset(
         action,
         asset,
     }
+}
+
+fn match_runtime_asset(
+    target: &str,
+    runtime: &EvaluationRuntime<'_>,
+    legacy_asset_policy_path: Option<&Path>,
+) -> Option<AssetMatch> {
+    legacy_asset_policy_path
+        .and_then(|asset_policy_path| match_legacy_asset(asset_policy_path, target))
+        .or_else(|| runtime.project_config.match_asset(target))
 }
 
 pub fn classify_action(acp: &ActionContextPacket) -> ClassifiedAction {
@@ -1109,6 +1137,23 @@ hard_blocks: []
         )
     }
 
+    fn evaluate_acp_with_legacy_asset_policy(
+        acp: ActionContextPacket,
+        project_config: &ProjectPolicy,
+        legacy_asset_policy_path: &Path,
+    ) -> DecisionOutput {
+        evaluate_with_legacy_asset_policy(
+            build_decision_input(acp),
+            EvaluationRuntime {
+                policy: &no_hard_blocks_policy(),
+                project_config,
+                approvals_path: &temp_path("approvals.jsonl"),
+                behavior_path: &temp_path("behavior.json"),
+            },
+            Some(legacy_asset_policy_path),
+        )
+    }
+
     fn active_file_write(target: &str, task: &str) -> ActionContextPacket {
         let mut acp = acp("file.write", target);
         acp.intent.active_task = Some(task.to_string());
@@ -1234,6 +1279,69 @@ hard_blocks: []
 
         assert_eq!(decision.decision, Decision::Block);
         assert!(decision.reason.contains(".env.production"));
+    }
+
+    #[test]
+    fn multi_target_patch_uses_strictest_infra_asset_decision() {
+        let mut acp = active_file_write("src/auth/session.ts", "fix src/auth/session.ts");
+        acp.action.targets = vec![
+            String::from("src/auth/session.ts"),
+            String::from(".github/workflows/deploy.yml"),
+        ];
+
+        let decision = evaluate_acp(acp, &ProjectPolicy::default());
+
+        assert_eq!(decision.decision, Decision::RequireApproval);
+        assert!(decision.reason.contains(".github/workflows/deploy.yml"));
+        assert!(decision.reason.contains("asset: infra"));
+    }
+
+    #[test]
+    fn multi_target_patch_allows_two_matching_source_targets() {
+        let mut acp = acp("file.write", "src/auth/session.ts");
+        acp.context.branch = String::from("fix/session-expiry");
+        acp.context.recent_files = vec![String::from("src/auth/session.ts")];
+        acp.action.targets = vec![
+            String::from("src/auth/session.ts"),
+            String::from("tests/auth/session.test.ts"),
+        ];
+
+        let decision = evaluate_acp(acp, &ProjectPolicy::default());
+
+        assert_eq!(decision.decision, Decision::Allow);
+        assert!(decision.reason.contains("matched task context score="));
+    }
+
+    #[test]
+    fn multi_target_patch_matches_legacy_asset_policy_per_target() {
+        let asset_policy_path = temp_path("legacy-assets.yml");
+        fs::write(
+            &asset_policy_path,
+            r#"
+assets:
+  - id: secure-source
+    paths:
+      - "src/secure/**"
+    sensitivity: critical
+    default_action: block
+"#,
+        )
+        .expect("legacy asset policy writes");
+        let mut acp = active_file_write("src/auth/session.ts", "fix src/auth/session.ts");
+        acp.action.targets = vec![
+            String::from("src/auth/session.ts"),
+            String::from("src/secure/keys.ts"),
+        ];
+
+        let decision = evaluate_acp_with_legacy_asset_policy(
+            acp,
+            &ProjectPolicy::default(),
+            &asset_policy_path,
+        );
+
+        assert_eq!(decision.decision, Decision::Block);
+        assert!(decision.reason.contains("src/secure/keys.ts"));
+        assert!(decision.reason.contains("asset: secure-source"));
     }
 
     #[test]

@@ -62,6 +62,38 @@ fn codex_pretooluse_blocks_destructive_mcp_tool() {
     assert!(!audit_body.contains("prod-123"));
 }
 
+#[test]
+fn codex_pretooluse_blocks_multi_target_patch_with_secret() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    let audit = tempdir.path().join("audit.log");
+    let mut input = codex_apply_patch_payload(
+        r#"*** Begin Patch
+*** Update File: src/lib.rs
+@@
+*** Update File: .env.production
+@@
+*** End Patch"#,
+        "fix src/lib.rs",
+    );
+    let mut output = Vec::new();
+    let mut error = Vec::new();
+
+    run_with_io(cli(&audit), &mut input, &mut output, &mut error).expect("hook succeeds");
+
+    assert!(error.is_empty());
+    let output_json: Value = serde_json::from_slice(&output).expect("stdout is json");
+    assert_eq!(
+        output_json["hookSpecificOutput"]["permissionDecision"],
+        "deny"
+    );
+    assert!(
+        output_json["hookSpecificOutput"]["permissionDecisionReason"]
+            .as_str()
+            .expect("reason is string")
+            .contains(".env.production")
+    );
+}
+
 fn cli(audit: &std::path::Path) -> Cli {
     Cli {
         command: Commands::Hook {
@@ -131,6 +163,23 @@ fn codex_mcp_payload(tool_name: &str) -> std::io::Cursor<Vec<u8>> {
             }
         },
         "tool_use_id": "toolu_2",
+        "model": "gpt-5.5",
+        "turn_id": "turn_1"
+    });
+    std::io::Cursor::new(serde_json::to_vec(&payload).expect("payload encodes"))
+}
+
+fn codex_apply_patch_payload(patch: &str, user_prompt: &str) -> std::io::Cursor<Vec<u8>> {
+    let payload = json!({
+        "session_id": "s1",
+        "cwd": "/repo",
+        "hook_event_name": "PreToolUse",
+        "tool_name": "apply_patch",
+        "tool_input": {
+            "patch": patch,
+            "user_prompt": user_prompt
+        },
+        "tool_use_id": "toolu_3",
         "model": "gpt-5.5",
         "turn_id": "turn_1"
     });
