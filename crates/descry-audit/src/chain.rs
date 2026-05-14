@@ -107,7 +107,7 @@ impl AuditChain {
             || GENESIS_PREV_HASH.to_string(),
             |event| event.record_hash.clone(),
         );
-        let mut event = AuditEvent::pending_with_context(
+        let mut event = AuditEvent::pending(
             self.next_seq,
             timestamp,
             decision,
@@ -115,8 +115,8 @@ impl AuditChain {
             rule_id,
             reason,
             prev_hash,
-            context,
-        );
+        )
+        .with_context(context);
         let canonical = canonical_minus_record_hash(&event)?;
         event.record_hash =
             record_hash(&self.repo_id_hash, event.seq, &event.prev_hash, &canonical);

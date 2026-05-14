@@ -48,28 +48,6 @@ impl AuditEvent {
         reason: Option<String>,
         prev_hash: impl Into<String>,
     ) -> Self {
-        Self::pending_with_context(
-            seq,
-            timestamp,
-            decision,
-            acp_hash,
-            rule_id,
-            reason,
-            prev_hash,
-            AuditEventContext::default(),
-        )
-    }
-
-    pub fn pending_with_context(
-        seq: u64,
-        timestamp: impl Into<String>,
-        decision: impl Into<String>,
-        acp_hash: impl Into<String>,
-        rule_id: Option<String>,
-        reason: Option<String>,
-        prev_hash: impl Into<String>,
-        context: AuditEventContext,
-    ) -> Self {
         Self {
             seq,
             timestamp: timestamp.into(),
@@ -77,16 +55,27 @@ impl AuditEvent {
             acp_hash: acp_hash.into(),
             rule_id,
             reason,
-            host: context.host,
-            actor: context.actor,
-            action_type: context.action_type,
-            target_fingerprint: context.target_fingerprint,
-            sanitized_target: context.sanitized_target,
-            asset_id: context.asset_id,
-            session_id_hash: context.session_id_hash,
+            host: None,
+            actor: None,
+            action_type: None,
+            target_fingerprint: None,
+            sanitized_target: None,
+            asset_id: None,
+            session_id_hash: None,
             prev_hash: prev_hash.into(),
             record_hash: String::new(),
         }
+    }
+
+    pub fn with_context(mut self, context: AuditEventContext) -> Self {
+        self.host = context.host;
+        self.actor = context.actor;
+        self.action_type = context.action_type;
+        self.target_fingerprint = context.target_fingerprint;
+        self.sanitized_target = context.sanitized_target;
+        self.asset_id = context.asset_id;
+        self.session_id_hash = context.session_id_hash;
+        self
     }
 }
 
