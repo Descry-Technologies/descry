@@ -1,6 +1,8 @@
 use std::fs;
+use std::path::Path;
+use std::process::Command;
 
-use descry_cli::{run_with_io, Cli, Commands};
+use descry_cli::{run_with_io, Cli, Commands, DoctorAgent};
 use serde_json::Value;
 
 #[test]
@@ -91,6 +93,8 @@ fn doctor_fails_when_codex_or_cursor_hook_is_missing() {
 fn doctor_uses_project_local_paths() {
     let tempdir = tempfile::tempdir().expect("tempdir");
     let project = tempdir.path().join("repo");
+    fs::create_dir_all(&project).expect("project creates");
+    git(&project, &["init"]);
     fs::create_dir_all(project.join(".claude")).expect("claude dir creates");
     fs::create_dir_all(project.join(".codex")).expect("codex dir creates");
     fs::create_dir_all(project.join(".cursor")).expect("cursor dir creates");
@@ -131,6 +135,11 @@ actions: {}
     )
     .expect("config writes");
     write_cursor_hooks(&project.join(".cursor/hooks.json"));
+    fs::write(
+        project.join(".git/hooks/pre-push"),
+        "#!/usr/bin/env sh\n# descry secret scan\ndescry scan secrets --staged\n",
+    )
+    .expect("git hook writes");
 
     let (exit_code, output) = run_project_doctor(&project);
 
@@ -144,6 +153,9 @@ actions: {}
     assert!(checks
         .iter()
         .any(|check| check["id"] == "project.index" && check["ok"] == true));
+    assert!(checks
+        .iter()
+        .any(|check| check["id"] == "hook.git.pre_push" && check["ok"] == true));
 }
 
 #[test]
@@ -151,6 +163,7 @@ fn doctor_fix_initializes_project_and_installs_hooks() {
     let tempdir = tempfile::tempdir().expect("tempdir");
     let project = tempdir.path().join("repo");
     fs::create_dir_all(project.join("src")).expect("project creates");
+    git(&project, &["init"]);
     fs::write(
         project.join("Cargo.toml"),
         "[package]\nname = \"repo\"\nversion = \"0.1.0\"\n",
@@ -165,6 +178,7 @@ fn doctor_fix_initializes_project_and_installs_hooks() {
         command: Commands::Doctor {
             project: Some(project.clone()),
             fix: true,
+            agent: DoctorAgent::All,
             claude_settings: None,
             codex_hooks: None,
             codex_config: None,
@@ -188,13 +202,68 @@ fn doctor_fix_initializes_project_and_installs_hooks() {
     assert!(project.join(".descry/state/project-index.json").exists());
     assert!(fs::read_to_string(project.join(".claude/settings.json"))
         .expect("claude settings reads")
-        .contains("descry hook claude pretooluse"));
+        .contains("hook claude pretooluse"));
     assert!(fs::read_to_string(project.join(".codex/hooks.json"))
         .expect("codex hooks reads")
-        .contains("descry hook codex pretooluse"));
+        .contains("hook codex pretooluse"));
     assert!(fs::read_to_string(project.join(".cursor/hooks.json"))
         .expect("cursor hooks reads")
-        .contains("descry hook cursor before-mcp-execution"));
+        .contains("hook cursor before-mcp-execution"));
+    assert!(fs::read_to_string(project.join(".git/hooks/pre-push"))
+        .expect("git hook reads")
+        .contains("# descry secret scan"));
+}
+
+#[test]
+fn doctor_fix_agent_git_installs_only_git_hook() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    let project = tempdir.path().join("repo");
+    fs::create_dir_all(&project).expect("project creates");
+    git(&project, &["init"]);
+
+    let (exit_code, output) = run_project_doctor_with_agent(&project, true, DoctorAgent::Git);
+
+    assert_eq!(exit_code, 0);
+    let json: Value = serde_json::from_slice(&output).expect("stdout is json");
+    assert_eq!(json["ok"], true);
+    let checks = json["checks"].as_array().expect("checks is array");
+    assert!(checks
+        .iter()
+        .any(|check| check["id"] == "repair.hook.git" && check["ok"] == true));
+    assert!(checks
+        .iter()
+        .any(|check| check["id"] == "hook.git.pre_push" && check["ok"] == true));
+    assert!(!project.join(".descry/project.yml").exists());
+}
+
+#[test]
+fn doctor_fix_agent_claude_repairs_project_and_installs_only_claude() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    let project = tempdir.path().join("repo");
+    fs::create_dir_all(project.join("src")).expect("project creates");
+    fs::write(
+        project.join("Cargo.toml"),
+        "[package]\nname = \"repo\"\nversion = \"0.1.0\"\n",
+    )
+    .expect("manifest writes");
+    fs::write(project.join("src/lib.rs"), "").expect("source writes");
+
+    let (exit_code, output) = run_project_doctor_with_agent(&project, true, DoctorAgent::Claude);
+
+    assert_eq!(exit_code, 0);
+    let json: Value = serde_json::from_slice(&output).expect("stdout is json");
+    assert_eq!(json["ok"], true);
+    let checks = json["checks"].as_array().expect("checks is array");
+    assert!(checks
+        .iter()
+        .any(|check| check["id"] == "repair.init" && check["ok"] == true));
+    assert!(checks
+        .iter()
+        .any(|check| check["id"] == "repair.hook.claude" && check["ok"] == true));
+    assert!(project.join(".descry/project.yml").exists());
+    assert!(project.join(".claude/settings.json").exists());
+    assert!(!project.join(".codex/hooks.json").exists());
+    assert!(!project.join(".cursor/hooks.json").exists());
 }
 
 fn run_doctor(
@@ -210,6 +279,7 @@ fn run_doctor(
         command: Commands::Doctor {
             project: None,
             fix: false,
+            agent: DoctorAgent::All,
             claude_settings: Some(settings.to_path_buf()),
             codex_hooks: Some(codex_hooks.to_path_buf()),
             codex_config: Some(codex_config.to_path_buf()),
@@ -238,6 +308,33 @@ fn run_project_doctor(project: &std::path::Path) -> (i32, Vec<u8>) {
         command: Commands::Doctor {
             project: Some(project.to_path_buf()),
             fix: false,
+            agent: DoctorAgent::All,
+            claude_settings: None,
+            codex_hooks: None,
+            codex_config: None,
+            cursor_hooks: None,
+            policy: workspace_root().join("policies/safe-defaults.yml"),
+            audit: project.join(".descry/audit.log"),
+            repo_id_hash: String::from("test-repo"),
+        },
+    };
+    let exit_code = match run_with_io(cli, &mut input, &mut output, &mut error) {
+        Ok(()) => 0,
+        Err(error) => error.exit_code(),
+    };
+    assert!(error.is_empty());
+    (exit_code, output)
+}
+
+fn run_project_doctor_with_agent(project: &Path, fix: bool, agent: DoctorAgent) -> (i32, Vec<u8>) {
+    let mut input = [].as_slice();
+    let mut output = Vec::new();
+    let mut error = Vec::new();
+    let cli = Cli {
+        command: Commands::Doctor {
+            project: Some(project.to_path_buf()),
+            fix,
+            agent,
             claude_settings: None,
             codex_hooks: None,
             codex_config: None,
@@ -331,4 +428,19 @@ fn workspace_root() -> std::path::PathBuf {
         .parent()
         .expect("crates dir has workspace parent")
         .to_path_buf()
+}
+
+fn git(cwd: &Path, args: &[&str]) {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .expect("git runs");
+
+    assert!(
+        output.status.success(),
+        "git {:?} failed: {}",
+        args,
+        String::from_utf8_lossy(&output.stderr)
+    );
 }

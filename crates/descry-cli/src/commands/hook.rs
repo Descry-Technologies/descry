@@ -1,6 +1,7 @@
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use descry_adapters::claude::{
@@ -60,10 +61,15 @@ pub(crate) fn run_install(action: HookInstallAction, output: &mut dyn Write) -> 
             settings,
             command,
         } => {
+            if let Some(project) = project.as_deref() {
+                ensure_project_ready_for_hook_install(project, output)?;
+            }
+            let command =
+                command.unwrap_or(default_hook_command(&["hook", "claude", "pretooluse"])?);
             let settings_path = match settings {
                 Some(path) => path,
-                None => match project {
-                    Some(project) => project_claude_settings_path(&project),
+                None => match project.as_deref() {
+                    Some(project) => project_claude_settings_path(project),
                     None => default_claude_settings_path()?,
                 },
             };
@@ -87,6 +93,11 @@ pub(crate) fn run_install(action: HookInstallAction, output: &mut dyn Write) -> 
             config,
             command,
         } => {
+            if let Some(project) = project.as_deref() {
+                ensure_project_ready_for_hook_install(project, output)?;
+            }
+            let command =
+                command.unwrap_or(default_hook_command(&["hook", "codex", "pretooluse"])?);
             let hooks_path = match hooks {
                 Some(path) => path,
                 None => match project.as_deref() {
@@ -124,10 +135,23 @@ pub(crate) fn run_install(action: HookInstallAction, output: &mut dyn Write) -> 
             command,
             mcp_command,
         } => {
+            if let Some(project) = project.as_deref() {
+                ensure_project_ready_for_hook_install(project, output)?;
+            }
+            let command = command.unwrap_or(default_hook_command(&[
+                "hook",
+                "cursor",
+                "before-shell-execution",
+            ])?);
+            let mcp_command = mcp_command.unwrap_or(default_hook_command(&[
+                "hook",
+                "cursor",
+                "before-mcp-execution",
+            ])?);
             let hooks_path = match hooks {
                 Some(path) => path,
-                None => match project {
-                    Some(project) => project_cursor_hooks_path(&project),
+                None => match project.as_deref() {
+                    Some(project) => project_cursor_hooks_path(project),
                     None => default_cursor_hooks_path()?,
                 },
             };
@@ -156,7 +180,9 @@ pub(crate) fn run_install(action: HookInstallAction, output: &mut dyn Write) -> 
             hook,
             command,
         } => {
-            let hook_path = project.join(".git/hooks").join(&hook);
+            let command =
+                command.unwrap_or(default_hook_command(&["scan", "secrets", "--staged"])?);
+            let hook_path = git_hook_path(&project, &hook)?;
             let installed = install_git_hook(&hook_path, &command)?;
             writeln!(
                 output,
@@ -174,16 +200,77 @@ pub(crate) fn run_install(action: HookInstallAction, output: &mut dyn Write) -> 
     }
 }
 
+fn default_hook_command(args: &[&str]) -> Result<String> {
+    let exe = std::env::current_exe()?;
+    let mut command = exe.to_string_lossy().to_string();
+    for arg in args {
+        command.push(' ');
+        command.push_str(arg);
+    }
+    Ok(command)
+}
+
+fn ensure_project_ready_for_hook_install(project: &Path, output: &mut dyn Write) -> Result<()> {
+    let project_policy = project.join(".descry/project.yml");
+    let project_index = project.join(".descry/state/project-index.json");
+    if project_policy.exists() && project_index.exists() {
+        return Ok(());
+    }
+
+    writeln!(
+        output,
+        "{}",
+        json!({
+            "ok": false,
+            "project": project,
+            "project_policy": project_policy,
+            "project_index": project_index,
+            "next": format!("descry init --project {}", project.display())
+        })
+    )?;
+    Err(CliError::new("project is not initialized", 2))
+}
+
+pub(crate) fn git_hook_path(project: &Path, hook: &str) -> Result<PathBuf> {
+    if let Ok(output) = Command::new("git")
+        .arg("-C")
+        .arg(project)
+        .args(["rev-parse", "--git-path"])
+        .arg(format!("hooks/{hook}"))
+        .output()
+    {
+        if output.status.success() {
+            let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !raw.is_empty() {
+                let path = PathBuf::from(raw);
+                return Ok(if path.is_absolute() {
+                    path
+                } else {
+                    project.join(path)
+                });
+            }
+        }
+    }
+
+    let fallback_hooks_dir = project.join(".git/hooks");
+    if fallback_hooks_dir.is_dir() {
+        return Ok(fallback_hooks_dir.join(hook));
+    }
+
+    Err(CliError::new(
+        format!(
+            "could not resolve git hook path for {}; run inside a git checkout",
+            project.display()
+        ),
+        2,
+    ))
+}
+
 fn install_git_hook(hook_path: &Path, command: &str) -> Result<bool> {
     let hooks_dir = hook_path.parent().ok_or_else(|| {
         CliError::new(format!("invalid git hook path {}", hook_path.display()), 2)
     })?;
-    if !hooks_dir.is_dir() {
-        return Err(CliError::new(
-            format!("missing git hooks directory {}", hooks_dir.display()),
-            2,
-        ));
-    }
+    fs::create_dir_all(hooks_dir)?;
 
     let existing = fs::read_to_string(hook_path).unwrap_or_default();
     if existing.contains(command) {

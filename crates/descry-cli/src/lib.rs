@@ -73,6 +73,8 @@ pub enum Commands {
         project: PathBuf,
         #[arg(long)]
         dry_run: bool,
+        #[arg(long)]
+        all: bool,
     },
     Daemon {
         #[command(subcommand)]
@@ -113,6 +115,8 @@ pub enum Commands {
         project: Option<PathBuf>,
         #[arg(long)]
         fix: bool,
+        #[arg(long, value_enum, default_value_t = DoctorAgent::All)]
+        agent: DoctorAgent,
         #[arg(long)]
         claude_settings: Option<PathBuf>,
         #[arg(long)]
@@ -167,6 +171,15 @@ pub enum ExpectedVerdict {
     Ask,
     RequireApproval,
     Block,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+pub enum DoctorAgent {
+    Claude,
+    Codex,
+    Cursor,
+    Git,
+    All,
 }
 
 #[derive(Debug, Subcommand)]
@@ -295,8 +308,8 @@ pub enum HookInstallAction {
         project: Option<PathBuf>,
         #[arg(long)]
         settings: Option<PathBuf>,
-        #[arg(long, default_value = "descry hook claude pretooluse")]
-        command: String,
+        #[arg(long)]
+        command: Option<String>,
     },
     Codex {
         #[arg(long)]
@@ -305,26 +318,26 @@ pub enum HookInstallAction {
         hooks: Option<PathBuf>,
         #[arg(long)]
         config: Option<PathBuf>,
-        #[arg(long, default_value = "descry hook codex pretooluse")]
-        command: String,
+        #[arg(long)]
+        command: Option<String>,
     },
     Cursor {
         #[arg(long)]
         project: Option<PathBuf>,
         #[arg(long)]
         hooks: Option<PathBuf>,
-        #[arg(long, default_value = "descry hook cursor before-shell-execution")]
-        command: String,
-        #[arg(long, default_value = "descry hook cursor before-mcp-execution")]
-        mcp_command: String,
+        #[arg(long)]
+        command: Option<String>,
+        #[arg(long)]
+        mcp_command: Option<String>,
     },
     Git {
         #[arg(long, default_value = ".")]
         project: PathBuf,
         #[arg(long, default_value = "pre-push")]
         hook: String,
-        #[arg(long, default_value = "descry scan secrets --staged")]
-        command: String,
+        #[arg(long)]
+        command: Option<String>,
     },
 }
 
@@ -454,9 +467,18 @@ pub fn run_with_io(
             error,
         ),
         Commands::Context { action } => commands::context::run(action, output),
-        Commands::Init { project, dry_run } => {
-            commands::init::run(commands::init::InitConfig { project, dry_run }, output)
-        }
+        Commands::Init {
+            project,
+            dry_run,
+            all,
+        } => commands::init::run(
+            commands::init::InitConfig {
+                project,
+                dry_run,
+                install_hooks: all,
+            },
+            output,
+        ),
         Commands::Daemon { action } => commands::daemon::run(action),
         Commands::Policy { action } => commands::policy::run(action, output),
         Commands::Task { action } => commands::task::run(action, output),
@@ -472,6 +494,7 @@ pub fn run_with_io(
         Commands::Doctor {
             project,
             fix,
+            agent,
             claude_settings,
             codex_hooks,
             codex_config,
@@ -483,6 +506,7 @@ pub fn run_with_io(
             commands::doctor::DoctorConfig {
                 project,
                 fix,
+                agent,
                 claude_settings,
                 codex_hooks,
                 codex_config,

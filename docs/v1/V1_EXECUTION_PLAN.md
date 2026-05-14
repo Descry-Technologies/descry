@@ -97,7 +97,7 @@ cargo test --workspace
 | DG-V1-000 | complete 2026-05-14 | Freeze launch contract and claim matrix | all |
 | DG-V1-010 | complete 2026-05-14 | Make release packages target-correct | DG-V1-020 |
 | DG-V1-020 | complete 2026-05-14 | Make installer consume release artifacts | DG-V1-030 |
-| DG-V1-030 | pending | Make init/doctor/hook install clean-machine reliable | DG-V1-040 |
+| DG-V1-030 | complete 2026-05-14 | Make init/doctor/hook install clean-machine reliable | DG-V1-040 |
 | DG-V1-040 | pending | Introduce shared runtime context spine | DG-V1-050, DG-V1-060, DG-V1-130 |
 | DG-V1-050 | pending | Enrich adapter outputs with safe harness metadata | DG-V1-060 |
 | DG-V1-060 | pending | Replace shallow task inference with evidence builder | DG-V1-070 |

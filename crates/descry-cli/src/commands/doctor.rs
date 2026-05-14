@@ -8,20 +8,22 @@ use serde_json::{json, Value};
 use crate::commands::hook::{
     codex_hooks_feature_enabled, contains_command_hook, contains_cursor_command_hook,
     default_claude_settings_path, default_codex_config_path, default_codex_hooks_path,
-    default_cursor_hooks_path, project_claude_settings_path, project_codex_config_path,
-    project_codex_hooks_path, project_cursor_hooks_path,
+    default_cursor_hooks_path, git_hook_path, project_claude_settings_path,
+    project_codex_config_path, project_codex_hooks_path, project_cursor_hooks_path,
 };
 use crate::commands::policy_source::load_policy;
-use crate::{CliError, DemoAction, HookInstallAction, Result};
+use crate::{CliError, DemoAction, DoctorAgent, HookInstallAction, Result};
 
-const CLAUDE_HOOK_COMMAND: &str = "descry hook claude pretooluse";
-const CODEX_HOOK_COMMAND: &str = "descry hook codex pretooluse";
-const CURSOR_SHELL_HOOK_COMMAND: &str = "descry hook cursor before-shell-execution";
-const CURSOR_MCP_HOOK_COMMAND: &str = "descry hook cursor before-mcp-execution";
+const CLAUDE_HOOK_COMMAND: &str = "hook claude pretooluse";
+const CODEX_HOOK_COMMAND: &str = "hook codex pretooluse";
+const CURSOR_SHELL_HOOK_COMMAND: &str = "hook cursor before-shell-execution";
+const CURSOR_MCP_HOOK_COMMAND: &str = "hook cursor before-mcp-execution";
+const GIT_HOOK_MARKER: &str = "# descry secret scan";
 
 pub struct DoctorConfig {
     pub project: Option<PathBuf>,
     pub fix: bool,
+    pub agent: DoctorAgent,
     pub claude_settings: Option<PathBuf>,
     pub codex_hooks: Option<PathBuf>,
     pub codex_config: Option<PathBuf>,
@@ -69,21 +71,42 @@ pub fn run(config: DoctorConfig, output: &mut dyn Write) -> Result<()> {
     let mut checks = Vec::new();
     checks.extend(repair_checks);
     if let Some(project) = config.project.as_deref() {
-        checks.push(check_project_config(&project.join(".descry/project.yml")));
-        checks.push(check_project_index(
-            &project.join(".descry/state/project-index.json"),
-        ));
+        if config.agent != DoctorAgent::Git {
+            checks.push(check_project_config(&project.join(".descry/project.yml")));
+            checks.push(check_project_index(
+                &project.join(".descry/state/project-index.json"),
+            ));
+        }
     }
-    checks.extend([
-        check_policy(&config.policy),
-        check_claude_hook(&settings_path),
-        check_codex_hook(&codex_hooks_path),
-        check_codex_feature(&codex_config_path),
-        check_cursor_shell_hook(&cursor_hooks_path),
-        check_cursor_mcp_hook(&cursor_hooks_path),
-        check_audit(&config.audit, &config.repo_id_hash),
-    ]);
-    checks.extend(check_launch_demos(&config.policy));
+    if config.agent == DoctorAgent::All {
+        checks.push(check_policy(&config.policy));
+    }
+    if matches!(config.agent, DoctorAgent::Claude | DoctorAgent::All) {
+        checks.push(check_claude_hook(&settings_path));
+    }
+    if matches!(config.agent, DoctorAgent::Codex | DoctorAgent::All) {
+        checks.push(check_codex_hook(&codex_hooks_path));
+        checks.push(check_codex_feature(&codex_config_path));
+    }
+    if matches!(config.agent, DoctorAgent::Cursor | DoctorAgent::All) {
+        checks.push(check_cursor_shell_hook(&cursor_hooks_path));
+        checks.push(check_cursor_mcp_hook(&cursor_hooks_path));
+    }
+    if matches!(config.agent, DoctorAgent::Git | DoctorAgent::All) {
+        if let Some(project) = config.project.as_deref() {
+            checks.push(check_git_hook(project));
+        } else if config.agent == DoctorAgent::Git {
+            checks.push(DoctorCheck {
+                id: "hook.git.pre_push",
+                ok: false,
+                detail: String::from("pass --project to check the git pre-push hook"),
+            });
+        }
+    }
+    if config.agent == DoctorAgent::All {
+        checks.push(check_audit(&config.audit, &config.repo_id_hash));
+        checks.extend(check_launch_demos(&config.policy));
+    }
     let ok = checks.iter().all(|check| check.ok);
     let checks_json: Vec<Value> = checks
         .into_iter()
@@ -116,18 +139,21 @@ fn apply_fixes(config: &DoctorConfig) -> Vec<DoctorCheck> {
     let mut checks = Vec::new();
 
     if let Some(project) = config.project.as_ref() {
-        let mut sink = Vec::new();
-        checks.push(repair_check(
-            "repair.init",
-            crate::commands::init::run(
-                crate::commands::init::InitConfig {
-                    project: project.clone(),
-                    dry_run: false,
-                },
-                &mut sink,
-            ),
-            "initialized project policy, state, memory, and index",
-        ));
+        if config.agent != DoctorAgent::Git {
+            let mut sink = Vec::new();
+            checks.push(repair_check(
+                "repair.init",
+                crate::commands::init::run(
+                    crate::commands::init::InitConfig {
+                        project: project.clone(),
+                        dry_run: false,
+                        install_hooks: false,
+                    },
+                    &mut sink,
+                ),
+                "initialized project policy, state, memory, and index",
+            ));
+        }
     }
 
     let settings = config.claude_settings.clone();
@@ -136,35 +162,56 @@ fn apply_fixes(config: &DoctorConfig) -> Vec<DoctorCheck> {
     let cursor_hooks = config.cursor_hooks.clone();
     let project = config.project.clone();
 
-    checks.push(repair_check(
-        "repair.hook.claude",
-        install_with_sink(HookInstallAction::Claude {
-            project: project.clone(),
-            settings,
-            command: CLAUDE_HOOK_COMMAND.to_string(),
-        }),
-        "installed Claude PreToolUse hook",
-    ));
-    checks.push(repair_check(
-        "repair.hook.codex",
-        install_with_sink(HookInstallAction::Codex {
-            project: project.clone(),
-            hooks: codex_hooks,
-            config: codex_config,
-            command: CODEX_HOOK_COMMAND.to_string(),
-        }),
-        "installed Codex PreToolUse hook and feature flag",
-    ));
-    checks.push(repair_check(
-        "repair.hook.cursor",
-        install_with_sink(HookInstallAction::Cursor {
-            project,
-            hooks: cursor_hooks,
-            command: CURSOR_SHELL_HOOK_COMMAND.to_string(),
-            mcp_command: CURSOR_MCP_HOOK_COMMAND.to_string(),
-        }),
-        "installed Cursor shell and MCP hooks",
-    ));
+    if matches!(config.agent, DoctorAgent::Claude | DoctorAgent::All) {
+        checks.push(repair_check(
+            "repair.hook.claude",
+            install_with_sink(HookInstallAction::Claude {
+                project: project.clone(),
+                settings,
+                command: None,
+            }),
+            "installed Claude PreToolUse hook",
+        ));
+    }
+    if matches!(config.agent, DoctorAgent::Codex | DoctorAgent::All) {
+        checks.push(repair_check(
+            "repair.hook.codex",
+            install_with_sink(HookInstallAction::Codex {
+                project: project.clone(),
+                hooks: codex_hooks,
+                config: codex_config,
+                command: None,
+            }),
+            "installed Codex PreToolUse hook and feature flag",
+        ));
+    }
+    if matches!(config.agent, DoctorAgent::Cursor | DoctorAgent::All) {
+        checks.push(repair_check(
+            "repair.hook.cursor",
+            install_with_sink(HookInstallAction::Cursor {
+                project: project.clone(),
+                hooks: cursor_hooks,
+                command: None,
+                mcp_command: None,
+            }),
+            "installed Cursor shell and MCP hooks",
+        ));
+    }
+    if matches!(config.agent, DoctorAgent::Git | DoctorAgent::All) {
+        let result = match project {
+            Some(project) => install_with_sink(HookInstallAction::Git {
+                project,
+                hook: String::from("pre-push"),
+                command: None,
+            }),
+            None => Err(CliError::new("pass --project to install the git hook", 2)),
+        };
+        checks.push(repair_check(
+            "repair.hook.git",
+            result,
+            "installed Git pre-push hook",
+        ));
+    }
 
     checks
 }
@@ -360,6 +407,30 @@ fn check_cursor_mcp_hook(hooks_path: &Path) -> DoctorCheck {
     }
 }
 
+fn check_git_hook(project: &Path) -> DoctorCheck {
+    match git_hook_path(project, "pre-push").and_then(|hook_path| {
+        fs::read_to_string(&hook_path)
+            .map(|body| (hook_path, body))
+            .map_err(CliError::from)
+    }) {
+        Ok((hook_path, body)) if body.contains(GIT_HOOK_MARKER) => DoctorCheck {
+            id: "hook.git.pre_push",
+            ok: true,
+            detail: format!("found Descry pre-push hook in {}", hook_path.display()),
+        },
+        Ok((hook_path, _)) => DoctorCheck {
+            id: "hook.git.pre_push",
+            ok: false,
+            detail: format!("missing Descry pre-push hook in {}", hook_path.display()),
+        },
+        Err(error) => DoctorCheck {
+            id: "hook.git.pre_push",
+            ok: false,
+            detail: error.to_string(),
+        },
+    }
+}
+
 fn read_json(path: &Path) -> std::result::Result<Value, String> {
     fs::read_to_string(path)
         .map_err(|error| error.to_string())
@@ -473,7 +544,7 @@ fn settings_has_nested_event_command_hook(
         .and_then(Value::as_object)
         .and_then(|hooks| hooks.get(event_name))
         .and_then(Value::as_array)
-        .is_some_and(|hooks| contains_command_hook(hooks, command))
+        .is_some_and(|hooks| contains_command_hook_suffix(hooks, command))
 }
 
 fn settings_has_cursor_shell_hook(settings: &Value) -> bool {
@@ -490,7 +561,42 @@ fn settings_has_cursor_event_hook(settings: &Value, event_name: &str, command: &
         .and_then(Value::as_object)
         .and_then(|hooks| hooks.get(event_name))
         .and_then(Value::as_array)
-        .is_some_and(|hooks| contains_cursor_command_hook(hooks, command))
+        .is_some_and(|hooks| contains_cursor_command_hook_suffix(hooks, command))
+}
+
+fn command_matches_suffix(command: &str, suffix: &str) -> bool {
+    command == suffix
+        || command.ends_with(&format!(" {suffix}"))
+        || command.ends_with(&format!("descry {suffix}"))
+}
+
+fn contains_command_hook_suffix(pretooluse_hooks: &[Value], command_suffix: &str) -> bool {
+    contains_command_hook(pretooluse_hooks, command_suffix)
+        || pretooluse_hooks.iter().any(|entry| {
+            entry
+                .get("hooks")
+                .and_then(Value::as_array)
+                .is_some_and(|hooks| {
+                    hooks.iter().any(|hook| {
+                        hook.get("type").and_then(Value::as_str) == Some("command")
+                            && hook
+                                .get("command")
+                                .and_then(Value::as_str)
+                                .is_some_and(|command| {
+                                    command_matches_suffix(command, command_suffix)
+                                })
+                    })
+                })
+        })
+}
+
+fn contains_cursor_command_hook_suffix(event_hooks: &[Value], command_suffix: &str) -> bool {
+    contains_cursor_command_hook(event_hooks, command_suffix)
+        || event_hooks.iter().any(|hook| {
+            hook.get("command")
+                .and_then(Value::as_str)
+                .is_some_and(|command| command_matches_suffix(command, command_suffix))
+        })
 }
 
 #[cfg(test)]

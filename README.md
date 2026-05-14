@@ -54,7 +54,7 @@ Release install:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/descry-dev/descry/main/scripts/install.sh | sh
-descry init
+descry init --all
 descry demo in-task-edit
 ```
 
@@ -72,7 +72,7 @@ Source checkout install:
 git clone https://github.com/descry-dev/descry.git
 cd descry
 DESCRY_INSTALL_MODE=source DESCRY_SOURCE_DIR=$PWD sh scripts/install.sh
-descry init --dry-run
+descry init --all --dry-run
 descry demo in-task-edit
 descry demo off-task-edit
 ```
@@ -98,7 +98,7 @@ reason: high write target .github/workflows/deploy.yml requires scoped approval 
 without Descry: deployment workflow changes without an explicit approval checkpoint
 ```
 
-For a real checkout, run `descry init` from the project root. It creates `.descry/project.yml`, `.descry/state/`, `.descry/memory/`, and `.descry/state/project-index.json`.
+For a real checkout, run `descry init --all` from the project root. It creates `.descry/project.yml`, `.descry/state/`, `.descry/memory/`, and `.descry/state/project-index.json`, then installs project-local Claude, Codex, Cursor, and Git hooks. Use plain `descry init` when you want project files without hook installation.
 
 ## Supported Agents
 
@@ -149,6 +149,7 @@ descry demo mcp-poison
 descry demo prod-delete
 descry init
 descry init --dry-run
+descry init --all
 descry context build
 descry context show
 descry scan secrets
@@ -170,6 +171,7 @@ descry logs search 'asset:production'
 descry policy test fixtures/railway-delete.json --expect block
 descry doctor
 descry doctor --fix
+descry doctor --agent git --fix
 ```
 
 Hook targets:

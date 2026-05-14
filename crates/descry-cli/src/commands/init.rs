@@ -2,13 +2,14 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use serde_json::json;
+use serde_json::{json, Value};
 
-use crate::Result;
+use crate::{HookInstallAction, Result};
 
 pub struct InitConfig {
     pub project: PathBuf,
     pub dry_run: bool,
+    pub install_hooks: bool,
 }
 
 pub fn run(config: InitConfig, output: &mut dyn Write) -> Result<()> {
@@ -19,7 +20,7 @@ pub fn run(config: InitConfig, output: &mut dyn Write) -> Result<()> {
     let memory_dir = descry_dir.join("memory");
     let index_path = state_dir.join("project-index.json");
 
-    if !config.dry_run {
+    let hooks = if !config.dry_run {
         fs::create_dir_all(&state_dir)?;
         fs::create_dir_all(&memory_dir)?;
         if !project_policy_path.exists() {
@@ -30,22 +31,66 @@ pub fn run(config: InitConfig, output: &mut dyn Write) -> Result<()> {
         }
         let index = descry_context::build_project_index(&project_root)?;
         descry_context::write_project_index(&index, &index_path)?;
-    }
+        if config.install_hooks {
+            install_all_hooks(&project_root)?
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
 
     writeln!(
         output,
         "{}",
         json!({
             "dry_run": config.dry_run,
+            "all": config.install_hooks,
             "project": project_root,
             "project_policy": project_policy_path,
             "state": state_dir,
             "memory": memory_dir,
             "project_index": index_path,
+            "hooks": hooks,
             "next": "descry doctor"
         })
     )?;
     Ok(())
+}
+
+fn install_all_hooks(project_root: &Path) -> Result<Vec<Value>> {
+    [
+        HookInstallAction::Claude {
+            project: Some(project_root.to_path_buf()),
+            settings: None,
+            command: None,
+        },
+        HookInstallAction::Codex {
+            project: Some(project_root.to_path_buf()),
+            hooks: None,
+            config: None,
+            command: None,
+        },
+        HookInstallAction::Cursor {
+            project: Some(project_root.to_path_buf()),
+            hooks: None,
+            command: None,
+            mcp_command: None,
+        },
+        HookInstallAction::Git {
+            project: project_root.to_path_buf(),
+            hook: String::from("pre-push"),
+            command: None,
+        },
+    ]
+    .into_iter()
+    .map(|action| {
+        let mut hook_output = Vec::new();
+        crate::commands::hook::run_install(action, &mut hook_output)?;
+        serde_json::from_slice(&hook_output)
+            .map_err(|error| crate::CliError::new(error.to_string(), 1))
+    })
+    .collect()
 }
 
 fn project_name(project_root: &Path) -> String {

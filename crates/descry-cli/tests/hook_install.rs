@@ -1,6 +1,7 @@
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 use std::process::Command;
 
 use descry_cli::{run_with_io, Cli, Commands, HookAction, HookInstallAction};
@@ -26,6 +27,42 @@ fn hook_install_claude_writes_pretooluse_command_hook() {
         settings_json["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
         "descry hook claude pretooluse"
     );
+}
+
+#[test]
+fn hook_install_claude_uses_absolute_default_command() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    let settings = tempdir.path().join(".claude/settings.json");
+    let mut input = [].as_slice();
+    let mut output = Vec::new();
+    let mut error = Vec::new();
+
+    run_with_io(
+        Cli {
+            command: Commands::Hook {
+                action: HookAction::Install {
+                    action: HookInstallAction::Claude {
+                        project: None,
+                        settings: Some(settings.clone()),
+                        command: None,
+                    },
+                },
+            },
+        },
+        &mut input,
+        &mut output,
+        &mut error,
+    )
+    .expect("install succeeds");
+
+    assert!(error.is_empty());
+    let settings_json: Value =
+        serde_json::from_str(&fs::read_to_string(&settings).expect("settings reads"))
+            .expect("settings is json");
+    let command = settings_json["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        .as_str()
+        .expect("command is string");
+    assert_absolute_command(command, "hook claude pretooluse");
 }
 
 #[test]
@@ -146,6 +183,7 @@ fn hook_install_cursor_writes_before_shell_execution_hook() {
 fn hook_install_uses_project_local_paths() {
     let tempdir = tempfile::tempdir().expect("tempdir");
     let project = tempdir.path().join("repo");
+    write_ready_project(&project);
     let mut input = [].as_slice();
     let mut output = Vec::new();
     let mut error = Vec::new();
@@ -214,6 +252,35 @@ fn hook_install_uses_project_local_paths() {
 }
 
 #[test]
+fn hook_install_project_requires_init() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    let project = tempdir.path().join("repo");
+    fs::create_dir_all(&project).expect("project creates");
+    let mut input = [].as_slice();
+    let mut output = Vec::new();
+    let mut error = Vec::new();
+
+    let exit_code = match run_with_io(
+        project_claude_cli(&project),
+        &mut input,
+        &mut output,
+        &mut error,
+    ) {
+        Ok(()) => 0,
+        Err(error) => error.exit_code(),
+    };
+
+    assert_eq!(exit_code, 2);
+    assert!(error.is_empty());
+    let output_json: Value = serde_json::from_slice(&output).expect("stdout is json");
+    assert_eq!(output_json["ok"], false);
+    assert!(output_json["next"]
+        .as_str()
+        .expect("next is string")
+        .contains("descry init --project"));
+}
+
+#[test]
 fn hook_install_git_writes_pre_push_secret_scan() {
     let tempdir = tempfile::tempdir().expect("tempdir");
     git(tempdir.path(), &["init"]);
@@ -259,6 +326,32 @@ fn hook_install_git_is_idempotent() {
     assert_eq!(hook.matches("descry scan secrets --staged").count(), 1);
 }
 
+#[test]
+fn hook_install_git_resolves_worktree_git_path() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    let main = tempdir.path().join("main");
+    let linked = tempdir.path().join("linked");
+    fs::create_dir_all(&main).expect("main creates");
+    git(&main, &["init"]);
+    git(&main, &["config", "user.email", "test@example.com"]);
+    git(&main, &["config", "user.name", "Descry Test"]);
+    fs::write(main.join("README.md"), "test\n").expect("readme writes");
+    git(&main, &["add", "README.md"]);
+    git(&main, &["commit", "-m", "initial"]);
+    git(
+        &main,
+        &["worktree", "add", linked.to_str().expect("linked utf8")],
+    );
+
+    let output = run_git_install(&linked).expect("git hook install succeeds");
+    let output_json: Value = serde_json::from_slice(&output).expect("stdout is json");
+    let hook_path = output_json["path"].as_str().expect("path is string");
+    assert!(Path::new(hook_path).exists());
+    assert!(fs::read_to_string(hook_path)
+        .expect("hook reads")
+        .contains("descry scan secrets --staged"));
+}
+
 fn run_install(settings: &std::path::Path) -> Result<Vec<u8>, descry_cli::CliError> {
     let mut input = [].as_slice();
     let mut output = Vec::new();
@@ -284,7 +377,7 @@ fn cli(settings: &std::path::Path) -> Cli {
                 action: HookInstallAction::Claude {
                     project: None,
                     settings: Some(settings.to_path_buf()),
-                    command: String::from("descry hook claude pretooluse"),
+                    command: Some(String::from("descry hook claude pretooluse")),
                 },
             },
         },
@@ -299,7 +392,7 @@ fn codex_cli(hooks: &std::path::Path, config: &std::path::Path) -> Cli {
                     project: None,
                     hooks: Some(hooks.to_path_buf()),
                     config: Some(config.to_path_buf()),
-                    command: String::from("descry hook codex pretooluse"),
+                    command: Some(String::from("descry hook codex pretooluse")),
                 },
             },
         },
@@ -313,8 +406,8 @@ fn cursor_cli(hooks: &std::path::Path) -> Cli {
                 action: HookInstallAction::Cursor {
                     project: None,
                     hooks: Some(hooks.to_path_buf()),
-                    command: String::from("descry hook cursor before-shell-execution"),
-                    mcp_command: String::from("descry hook cursor before-mcp-execution"),
+                    command: Some(String::from("descry hook cursor before-shell-execution")),
+                    mcp_command: Some(String::from("descry hook cursor before-mcp-execution")),
                 },
             },
         },
@@ -328,7 +421,7 @@ fn project_claude_cli(project: &std::path::Path) -> Cli {
                 action: HookInstallAction::Claude {
                     project: Some(project.to_path_buf()),
                     settings: None,
-                    command: String::from("descry hook claude pretooluse"),
+                    command: Some(String::from("descry hook claude pretooluse")),
                 },
             },
         },
@@ -343,7 +436,7 @@ fn project_codex_cli(project: &std::path::Path) -> Cli {
                     project: Some(project.to_path_buf()),
                     hooks: None,
                     config: None,
-                    command: String::from("descry hook codex pretooluse"),
+                    command: Some(String::from("descry hook codex pretooluse")),
                 },
             },
         },
@@ -357,8 +450,8 @@ fn project_cursor_cli(project: &std::path::Path) -> Cli {
                 action: HookInstallAction::Cursor {
                     project: Some(project.to_path_buf()),
                     hooks: None,
-                    command: String::from("descry hook cursor before-shell-execution"),
-                    mcp_command: String::from("descry hook cursor before-mcp-execution"),
+                    command: Some(String::from("descry hook cursor before-shell-execution")),
+                    mcp_command: Some(String::from("descry hook cursor before-mcp-execution")),
                 },
             },
         },
@@ -372,11 +465,58 @@ fn git_cli(project: &std::path::Path) -> Cli {
                 action: HookInstallAction::Git {
                     project: project.to_path_buf(),
                     hook: String::from("pre-push"),
-                    command: String::from("descry scan secrets --staged"),
+                    command: Some(String::from("descry scan secrets --staged")),
                 },
             },
         },
     }
+}
+
+fn write_ready_project(project: &Path) {
+    fs::create_dir_all(project.join(".descry/state")).expect("state creates");
+    fs::create_dir_all(project.join(".descry/memory")).expect("memory creates");
+    fs::write(
+        project.join(".descry/project.yml"),
+        r#"
+project:
+  name: repo
+assets: []
+actions: {}
+"#,
+    )
+    .expect("project policy writes");
+    descry_context::write_project_index(
+        &descry_context::ProjectIndex {
+            repo_root: project.to_path_buf(),
+            repo_name: String::from("repo"),
+            branch: Some(String::from("main")),
+            languages: vec![String::from("rust")],
+            frameworks: vec![String::from("cargo")],
+            source_paths: Vec::new(),
+            test_paths: Vec::new(),
+            infra_paths: Vec::new(),
+            config_paths: Vec::new(),
+            secret_paths: Vec::new(),
+            deploy_paths: Vec::new(),
+        },
+        &project.join(".descry/state/project-index.json"),
+    )
+    .expect("project index writes");
+}
+
+fn assert_absolute_command(command: &str, suffix: &str) {
+    let executable = command
+        .split_whitespace()
+        .next()
+        .expect("command has executable");
+    assert!(
+        Path::new(executable).is_absolute(),
+        "command is not absolute: {command}"
+    );
+    assert!(
+        command.ends_with(suffix),
+        "command {command:?} did not end with {suffix:?}"
+    );
 }
 
 fn git(cwd: &std::path::Path, args: &[&str]) {
