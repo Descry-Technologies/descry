@@ -122,7 +122,7 @@ fn claude_pretooluse_downgrades_sensitive_write_with_live_approval() {
     descry_memory::append_approval(
         &approvals,
         &Approval {
-            scope: String::from("crates/descry-engine/**"),
+            scope: String::from("path:crates/descry-engine/**"),
             created_at_epoch_seconds: 1,
             expires_at_epoch_seconds: u64::MAX,
             approver: String::from("human"),
@@ -403,13 +403,13 @@ fn claude_pretooluse_enriches_context_from_project_index() {
     let output_json: Value = serde_json::from_slice(&output).expect("stdout is json");
     assert_eq!(
         output_json["hookSpecificOutput"]["permissionDecision"],
-        "allow"
+        "ask"
     );
     assert!(
         output_json["hookSpecificOutput"]["permissionDecisionReason"]
             .as_str()
             .expect("reason is string")
-            .contains("fix/session-expiry")
+            .contains("task context")
     );
 }
 
