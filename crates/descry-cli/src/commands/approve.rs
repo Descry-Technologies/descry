@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use descry_memory::Approval;
 use serde_json::json;
 
-use crate::{CliError, Result};
+use crate::{ApprovalsAction, CliError, Result};
 
 pub fn run(
     scope: String,
@@ -37,6 +37,37 @@ pub fn run(
         })
     )?;
     Ok(())
+}
+
+pub fn run_approvals(action: ApprovalsAction, output: &mut dyn Write) -> Result<()> {
+    match action {
+        ApprovalsAction::List { path } => {
+            let now = current_epoch_seconds()?;
+            let approvals = descry_memory::load_approvals(&path)
+                .map_err(|error| CliError::new(error.to_string(), 1))?;
+            let approvals_json: Vec<_> = approvals
+                .iter()
+                .map(|approval| {
+                    json!({
+                        "scope": approval.scope,
+                        "created_at_epoch_seconds": approval.created_at_epoch_seconds,
+                        "expires_at_epoch_seconds": approval.expires_at_epoch_seconds,
+                        "approver": approval.approver,
+                        "live": approval.is_live_at(now)
+                    })
+                })
+                .collect();
+            writeln!(
+                output,
+                "{}",
+                json!({
+                    "path": path,
+                    "approvals": approvals_json
+                })
+            )?;
+            Ok(())
+        }
+    }
 }
 
 fn current_epoch_seconds() -> Result<u64> {

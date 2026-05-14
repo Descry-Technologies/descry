@@ -96,13 +96,23 @@ pub enum Commands {
         #[arg(long, default_value = "human")]
         approver: String,
     },
+    Approvals {
+        #[command(subcommand)]
+        action: ApprovalsAction,
+    },
     Logs {
         #[command(subcommand)]
         action: LogsAction,
     },
+    Scan {
+        #[command(subcommand)]
+        action: ScanAction,
+    },
     Doctor {
         #[arg(long)]
         project: Option<PathBuf>,
+        #[arg(long)]
+        fix: bool,
         #[arg(long)]
         claude_settings: Option<PathBuf>,
         #[arg(long)]
@@ -195,6 +205,35 @@ pub enum LogsAction {
         #[arg(long, default_value = "descry-default-repo")]
         repo_id_hash: String,
     },
+    Tail {
+        #[arg(long, default_value = ".descry/audit.log")]
+        path: PathBuf,
+        #[arg(short = 'n', long, default_value_t = 20)]
+        lines: usize,
+    },
+    Search {
+        query: String,
+        #[arg(long, default_value = ".descry/audit.log")]
+        path: PathBuf,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ApprovalsAction {
+    List {
+        #[arg(long, default_value = ".descry/memory/approvals.jsonl")]
+        path: PathBuf,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ScanAction {
+    Secrets {
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+        #[arg(long)]
+        staged: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -278,6 +317,14 @@ pub enum HookInstallAction {
         command: String,
         #[arg(long, default_value = "descry hook cursor before-mcp-execution")]
         mcp_command: String,
+    },
+    Git {
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+        #[arg(long, default_value = "pre-push")]
+        hook: String,
+        #[arg(long, default_value = "descry scan secrets --staged")]
+        command: String,
     },
 }
 
@@ -419,9 +466,12 @@ pub fn run_with_io(
             path,
             approver,
         } => commands::approve::run(scope, ttl, path, approver, output),
+        Commands::Approvals { action } => commands::approve::run_approvals(action, output),
         Commands::Logs { action } => commands::logs::run(action, output, error),
+        Commands::Scan { action } => commands::scan::run(action, output),
         Commands::Doctor {
             project,
+            fix,
             claude_settings,
             codex_hooks,
             codex_config,
@@ -432,6 +482,7 @@ pub fn run_with_io(
         } => commands::doctor::run(
             commands::doctor::DoctorConfig {
                 project,
+                fix,
                 claude_settings,
                 codex_hooks,
                 codex_config,

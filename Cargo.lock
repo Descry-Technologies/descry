@@ -294,6 +294,8 @@ version = "0.0.0"
 dependencies = [
  "axum",
  "descry-core",
+ "descry-engine",
+ "descry-policy",
  "serde_json",
  "tokio",
  "tower",

@@ -19,6 +19,7 @@ pub struct CodexHookInput {
 pub fn normalize_pretooluse(input: &CodexHookInput) -> ActionContextPacket {
     let action_type = action_type_for_tool(&input.tool_name);
     let target = target_for_tool(input);
+    let targets = targets_for_tool(input, &target);
     let cwd = input.cwd.as_deref().unwrap_or("unknown");
 
     ActionContextPacket {
@@ -32,11 +33,13 @@ pub fn normalize_pretooluse(input: &CodexHookInput) -> ActionContextPacket {
             action_type: action_type.to_string(),
             verb: verb_for_action_type(action_type).to_string(),
             target,
+            targets,
             diff_summary: diff_summary_for_tool(input),
             argument_keys: Vec::new(),
         },
         intent: Intent {
             active_task: None,
+            user_prompt: prompt_for_hook(input),
             source: String::from("codex_pretooluse"),
             linked_issue: None,
         },
@@ -89,8 +92,19 @@ fn asset_type_for_action_type(action_type: &str) -> &'static str {
 fn target_for_tool(input: &CodexHookInput) -> String {
     match input.tool_name.as_str() {
         "Bash" => string_field(&input.tool_input, "command").unwrap_or_default(),
-        "apply_patch" => String::from("apply_patch"),
+        "apply_patch" => extract_patch_paths(input)
+            .first()
+            .cloned()
+            .unwrap_or_else(|| String::from("apply_patch")),
         _ => input.tool_name.clone(),
+    }
+}
+
+fn targets_for_tool(input: &CodexHookInput, target: &str) -> Vec<String> {
+    if input.tool_name == "apply_patch" {
+        extract_patch_paths(input)
+    } else {
+        vec![target.to_string()]
     }
 }
 
@@ -107,6 +121,44 @@ fn string_field(value: &Value, field: &str) -> Option<String> {
         .get(field)
         .and_then(Value::as_str)
         .map(ToString::to_string)
+}
+
+fn prompt_for_hook(input: &CodexHookInput) -> Option<String> {
+    string_field(&input.tool_input, "user_prompt")
+        .or_else(|| string_field(&input.tool_input, "prompt"))
+}
+
+fn extract_patch_paths(input: &CodexHookInput) -> Vec<String> {
+    let Some(patch) = patch_text(input) else {
+        return Vec::new();
+    };
+    let mut paths = Vec::new();
+    for line in patch.lines() {
+        if let Some(path) = line.strip_prefix("*** Update File: ") {
+            paths.push(path.trim().to_string());
+        } else if let Some(path) = line.strip_prefix("*** Add File: ") {
+            paths.push(path.trim().to_string());
+        } else if let Some(path) = line.strip_prefix("*** Delete File: ") {
+            paths.push(path.trim().to_string());
+        } else if let Some(path) = line.strip_prefix("*** Move to: ") {
+            paths.push(path.trim().to_string());
+        }
+    }
+
+    paths.retain(|path| !path.is_empty());
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+fn patch_text(input: &CodexHookInput) -> Option<String> {
+    if let Some(value) = input.tool_input.as_str() {
+        return Some(value.to_string());
+    }
+
+    ["patch", "input", "cmd", "command"]
+        .into_iter()
+        .find_map(|field| string_field(&input.tool_input, field))
 }
 
 #[cfg(test)]
@@ -133,5 +185,38 @@ mod tests {
         assert_eq!(acp.actor.name, "codex-cli");
         assert_eq!(acp.action.action_type, "shell.exec");
         assert_eq!(acp.action.target, "rm -rf ~");
+        assert_eq!(acp.action.targets, vec![String::from("rm -rf ~")]);
+    }
+
+    #[test]
+    fn normalizes_apply_patch_paths_without_patch_content() {
+        let input = CodexHookInput {
+            session_id: String::from("s1"),
+            cwd: Some(String::from("/repo")),
+            hook_event_name: String::from("PreToolUse"),
+            tool_name: String::from("apply_patch"),
+            tool_input: json!({
+                "cmd": "*** Begin Patch\n*** Update File: .env.production\n-secret\n+secret\n*** Add File: src/auth/session.rs\n+pub fn ok() {}\n*** End Patch\n"
+            }),
+            tool_use_id: Some(String::from("toolu_1")),
+            model: Some(String::from("gpt-5.5")),
+            turn_id: Some(String::from("t1")),
+        };
+
+        let acp = normalize_pretooluse(&input);
+
+        assert_eq!(acp.action.action_type, "file.write");
+        assert_eq!(acp.action.target, ".env.production");
+        assert_eq!(
+            acp.action.targets,
+            vec![
+                String::from(".env.production"),
+                String::from("src/auth/session.rs")
+            ]
+        );
+        assert_eq!(
+            acp.action.diff_summary.as_deref(),
+            Some("Codex apply_patch content omitted")
+        );
     }
 }

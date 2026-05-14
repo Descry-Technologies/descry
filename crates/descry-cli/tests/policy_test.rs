@@ -20,6 +20,11 @@ fn policy_test_matches_tier_one_fixtures() {
         ("fixtures/db-drop-database.json", ExpectedVerdict::Block),
         ("fixtures/db-truncate-table.json", ExpectedVerdict::Block),
         (
+            "fixtures/db-delete-without-where.json",
+            ExpectedVerdict::Block,
+        ),
+        ("fixtures/db-delete-with-where.json", ExpectedVerdict::Allow),
+        (
             "fixtures/mcp-prod-control-plane.json",
             ExpectedVerdict::Block,
         ),

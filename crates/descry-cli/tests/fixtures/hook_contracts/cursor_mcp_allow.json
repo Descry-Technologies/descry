@@ -1,0 +1,10 @@
+{
+  "continue": true,
+  "permission": "allow",
+  "decision": "allow",
+  "reasonContains": [
+    "no hard-block matched"
+  ],
+  "userMessageSameAsReason": true,
+  "agentMessageSameAsReason": true
+}

@@ -1,0 +1,10 @@
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "ask",
+    "permissionDecisionReasonContains": [
+      "requires scoped approval",
+      "descry approve --scope 'path:crates/descry-engine/src/**' --ttl 30m"
+    ]
+  }
+}

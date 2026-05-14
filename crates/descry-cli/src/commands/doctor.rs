@@ -12,7 +12,7 @@ use crate::commands::hook::{
     project_codex_hooks_path, project_cursor_hooks_path,
 };
 use crate::commands::policy_source::load_policy;
-use crate::{CliError, DemoAction, Result};
+use crate::{CliError, DemoAction, HookInstallAction, Result};
 
 const CLAUDE_HOOK_COMMAND: &str = "descry hook claude pretooluse";
 const CODEX_HOOK_COMMAND: &str = "descry hook codex pretooluse";
@@ -21,6 +21,7 @@ const CURSOR_MCP_HOOK_COMMAND: &str = "descry hook cursor before-mcp-execution";
 
 pub struct DoctorConfig {
     pub project: Option<PathBuf>,
+    pub fix: bool,
     pub claude_settings: Option<PathBuf>,
     pub codex_hooks: Option<PathBuf>,
     pub codex_config: Option<PathBuf>,
@@ -31,6 +32,12 @@ pub struct DoctorConfig {
 }
 
 pub fn run(config: DoctorConfig, output: &mut dyn Write) -> Result<()> {
+    let repair_checks = if config.fix {
+        apply_fixes(&config)
+    } else {
+        Vec::new()
+    };
+
     let settings_path = match config.claude_settings {
         Some(path) => path,
         None => match config.project.as_deref() {
@@ -60,6 +67,7 @@ pub fn run(config: DoctorConfig, output: &mut dyn Write) -> Result<()> {
         },
     };
     let mut checks = Vec::new();
+    checks.extend(repair_checks);
     if let Some(project) = config.project.as_deref() {
         checks.push(check_project_config(&project.join(".descry/project.yml")));
         checks.push(check_project_index(
@@ -101,6 +109,83 @@ pub fn run(config: DoctorConfig, output: &mut dyn Write) -> Result<()> {
         Ok(())
     } else {
         Err(CliError::new("", 1))
+    }
+}
+
+fn apply_fixes(config: &DoctorConfig) -> Vec<DoctorCheck> {
+    let mut checks = Vec::new();
+
+    if let Some(project) = config.project.as_ref() {
+        let mut sink = Vec::new();
+        checks.push(repair_check(
+            "repair.init",
+            crate::commands::init::run(
+                crate::commands::init::InitConfig {
+                    project: project.clone(),
+                    dry_run: false,
+                },
+                &mut sink,
+            ),
+            "initialized project policy, state, memory, and index",
+        ));
+    }
+
+    let settings = config.claude_settings.clone();
+    let codex_hooks = config.codex_hooks.clone();
+    let codex_config = config.codex_config.clone();
+    let cursor_hooks = config.cursor_hooks.clone();
+    let project = config.project.clone();
+
+    checks.push(repair_check(
+        "repair.hook.claude",
+        install_with_sink(HookInstallAction::Claude {
+            project: project.clone(),
+            settings,
+            command: CLAUDE_HOOK_COMMAND.to_string(),
+        }),
+        "installed Claude PreToolUse hook",
+    ));
+    checks.push(repair_check(
+        "repair.hook.codex",
+        install_with_sink(HookInstallAction::Codex {
+            project: project.clone(),
+            hooks: codex_hooks,
+            config: codex_config,
+            command: CODEX_HOOK_COMMAND.to_string(),
+        }),
+        "installed Codex PreToolUse hook and feature flag",
+    ));
+    checks.push(repair_check(
+        "repair.hook.cursor",
+        install_with_sink(HookInstallAction::Cursor {
+            project,
+            hooks: cursor_hooks,
+            command: CURSOR_SHELL_HOOK_COMMAND.to_string(),
+            mcp_command: CURSOR_MCP_HOOK_COMMAND.to_string(),
+        }),
+        "installed Cursor shell and MCP hooks",
+    ));
+
+    checks
+}
+
+fn install_with_sink(action: HookInstallAction) -> Result<()> {
+    let mut sink = Vec::new();
+    crate::commands::hook::run_install(action, &mut sink)
+}
+
+fn repair_check(id: &'static str, result: Result<()>, success: &str) -> DoctorCheck {
+    match result {
+        Ok(()) => DoctorCheck {
+            id,
+            ok: true,
+            detail: success.to_string(),
+        },
+        Err(error) => DoctorCheck {
+            id,
+            ok: false,
+            detail: error.to_string(),
+        },
     }
 }
 

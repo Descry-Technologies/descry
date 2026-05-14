@@ -51,6 +51,11 @@ pub struct TaskEnvelope {
     pub sources: Vec<TaskSource>,
     pub likely_paths: Vec<String>,
     pub likely_terms: Vec<String>,
+    pub matched_context_sources: Vec<TaskSource>,
+    pub matched_terms: Vec<String>,
+    pub matched_paths: Vec<String>,
+    pub matched_asset: Option<String>,
+    pub matched_policy: Option<String>,
     pub allowed_action_classes: Vec<ActionClass>,
     pub suspicious_action_classes: Vec<ActionClass>,
 }
@@ -83,6 +88,8 @@ impl TaskEnvelope {
         let likely_terms = likely_terms(acp);
         let confidence = if acp.intent.active_task.is_some() {
             0.7
+        } else if acp.intent.user_prompt.is_some() {
+            0.6
         } else if !likely_paths.is_empty() || !likely_terms.is_empty() {
             0.45
         } else {
@@ -92,9 +99,14 @@ impl TaskEnvelope {
         Self {
             summary,
             confidence,
-            sources,
-            likely_paths,
-            likely_terms,
+            sources: sources.clone(),
+            likely_paths: likely_paths.clone(),
+            likely_terms: likely_terms.clone(),
+            matched_context_sources: sources.clone(),
+            matched_terms: likely_terms,
+            matched_paths: likely_paths,
+            matched_asset: None,
+            matched_policy: None,
             allowed_action_classes: vec![ActionClass::FileRead, ActionClass::ShellTest],
             suspicious_action_classes: vec![
                 ActionClass::ShellDelete,
@@ -108,7 +120,9 @@ impl TaskEnvelope {
 }
 
 fn inferred_summary(acp: &ActionContextPacket) -> String {
-    if acp.context.branch != "unknown" && !acp.context.branch.trim().is_empty() {
+    if let Some(prompt) = acp.intent.user_prompt.as_deref() {
+        prompt.to_string()
+    } else if acp.context.branch != "unknown" && !acp.context.branch.trim().is_empty() {
         acp.context.branch.clone()
     } else if !acp.context.recent_files.is_empty() {
         format!("recent work near {}", acp.context.recent_files.join(", "))
@@ -121,6 +135,9 @@ fn task_sources(acp: &ActionContextPacket) -> Vec<TaskSource> {
     let mut sources = Vec::new();
     if acp.intent.active_task.is_some() {
         sources.push(TaskSource::ActiveTask);
+    }
+    if acp.intent.user_prompt.is_some() {
+        sources.push(TaskSource::UserPrompt);
     }
     if acp.context.branch != "unknown" && !acp.context.branch.trim().is_empty() {
         sources.push(TaskSource::Branch);
@@ -145,6 +162,9 @@ fn likely_terms(acp: &ActionContextPacket) -> Vec<String> {
     let mut terms = Vec::new();
     if let Some(task) = acp.intent.active_task.as_deref() {
         terms.extend(split_terms(task));
+    }
+    if let Some(prompt) = acp.intent.user_prompt.as_deref() {
+        terms.extend(split_terms(prompt));
     }
     terms.extend(split_terms(&acp.context.branch));
     for path in &acp.context.recent_files {

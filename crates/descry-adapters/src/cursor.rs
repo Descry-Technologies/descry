@@ -63,11 +63,13 @@ pub fn normalize_before_shell_execution(input: &CursorShellHookInput) -> ActionC
             action_type: String::from("shell.exec"),
             verb: String::from("run"),
             target,
+            targets: Vec::new(),
             diff_summary: None,
             argument_keys: Vec::new(),
         },
         intent: Intent {
             active_task: None,
+            user_prompt: prompt_for_tool_input(&input.tool_input),
             source: String::from("cursor_before_shell_execution"),
             linked_issue: None,
         },
@@ -105,11 +107,13 @@ pub fn normalize_before_mcp_execution(input: &CursorMcpHookInput) -> ActionConte
             action_type: String::from("mcp.call"),
             verb: String::from("call"),
             target,
+            targets: Vec::new(),
             diff_summary: mcp_diff_summary(input),
             argument_keys: mcp_argument_keys(input),
         },
         intent: Intent {
             active_task: None,
+            user_prompt: prompt_for_tool_input(&input.tool_input),
             source: String::from("cursor_before_mcp_execution"),
             linked_issue: None,
         },
@@ -149,6 +153,10 @@ fn string_field(value: &Value, field: &str) -> Option<String> {
         .get(field)
         .and_then(Value::as_str)
         .map(ToString::to_string)
+}
+
+fn prompt_for_tool_input(value: &Value) -> Option<String> {
+    string_field(value, "user_prompt").or_else(|| string_field(value, "prompt"))
 }
 
 fn mcp_target(input: &CursorMcpHookInput) -> String {

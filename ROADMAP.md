@@ -8,25 +8,34 @@ Descry Guard is the open-source local engine for AI coding-agent safety. This ro
 - Safe-default Tier-1 blocks
 - Claude Code, Codex, and Cursor hook support
 - Local hash-chained audit log
-- Scoped TTL approvals
+- Codex path-aware patch evaluation
+- Project asset/action policy enforcement
+- Typed scoped TTL approvals
+- Branch, recent-file, and prompt-informed task inference
+- `descry init`
+- source install script
+- staged/pre-push secret scanning
+- release artifact packaging
+- Homebrew formula generation
+- source installer smoke-tested with isolated install root
+- `cargo install --locked --path crates/descry-cli` smoke-tested
+- `descry doctor --fix` for project init and hook repair
+- `descry logs tail` / `descry logs search`
 - `descry demo pocketos`
+- `descry demo rm-rf`
+- `descry demo mcp-poison`
+- SQL-aware `DELETE FROM ...` without `WHERE`
 - Public CI and source-ready repository hygiene
 
 ## v0.1 Remaining
 
-- `descry init`
-- install script and Homebrew tap
-- staged/pre-push secret scanning
-- SQL-aware `DELETE FROM ...` without `WHERE`
-- `descry demo rm-rf`
-- `descry demo mcp-poison`
-- README install path tested on a clean machine
+- Publish Homebrew tap repository
+- Clean-machine README install test outside the development checkout
 
 ## v0.2
 
 - Better asset sensitivity configuration
 - Richer block UX with fix suggestions and override phrase
-- Log tail/search
 - MCP proxy prototype
 - False-positive regression suite against representative repositories
 

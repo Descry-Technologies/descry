@@ -22,6 +22,8 @@ pub struct Action {
     pub action_type: String,
     pub verb: String,
     pub target: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub targets: Vec<String>,
     pub diff_summary: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub argument_keys: Vec<String>,
@@ -30,6 +32,8 @@ pub struct Action {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct Intent {
     pub active_task: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_prompt: Option<String>,
     pub source: String,
     pub linked_issue: Option<String>,
 }

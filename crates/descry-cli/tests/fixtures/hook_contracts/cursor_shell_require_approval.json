@@ -1,0 +1,11 @@
+{
+  "continue": true,
+  "permission": "ask",
+  "decision": "ask",
+  "reasonContains": [
+    "requires approval by action policy",
+    "descry approve --scope 'action:deploy' --ttl 30m"
+  ],
+  "userMessageSameAsReason": true,
+  "agentMessageSameAsReason": true
+}

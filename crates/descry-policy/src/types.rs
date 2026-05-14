@@ -34,6 +34,8 @@ pub struct HardBlock {
     pub argument_key_matches: Vec<String>,
     #[serde(default)]
     pub argument_key_regex: Option<String>,
+    #[serde(default)]
+    pub sql_delete_without_where: bool,
     pub reason: String,
 }
 

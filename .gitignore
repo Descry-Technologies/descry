@@ -41,6 +41,7 @@ agents/tests/
 .cache/
 .pytest_cache/
 node_modules/
+dist/
 
 # OS
 Thumbs.db

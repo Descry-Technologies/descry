@@ -47,11 +47,13 @@ pub fn normalize_pretooluse(input: &ClaudeHookInput) -> ActionContextPacket {
             action_type: String::from(action_type),
             verb: String::from(verb),
             target,
+            targets: Vec::new(),
             diff_summary: diff_summary_for_tool(input),
             argument_keys: Vec::new(),
         },
         intent: Intent {
             active_task: None,
+            user_prompt: prompt_for_hook(input),
             source: String::from("claude_pretooluse"),
             linked_issue: None,
         },
@@ -137,6 +139,11 @@ fn string_field(value: &Value, field: &str) -> Option<String> {
         .get(field)
         .and_then(Value::as_str)
         .map(ToString::to_string)
+}
+
+fn prompt_for_hook(input: &ClaudeHookInput) -> Option<String> {
+    string_field(&input.tool_input, "user_prompt")
+        .or_else(|| string_field(&input.tool_input, "prompt"))
 }
 
 #[cfg(test)]

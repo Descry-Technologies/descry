@@ -19,7 +19,41 @@ impl Approval {
     }
 
     pub fn matches_target(&self, target: &str, now_epoch_seconds: u64) -> bool {
-        self.is_live_at(now_epoch_seconds) && scope_matches(&self.scope, target)
+        self.matches_path_target(target, now_epoch_seconds)
+    }
+
+    pub fn matches_path_target(&self, target: &str, now_epoch_seconds: u64) -> bool {
+        self.is_live_at(now_epoch_seconds)
+            && matches!(self.parsed_scope().kind, ApprovalScopeKind::Path)
+            && scope_matches(&self.parsed_scope().pattern, target)
+    }
+
+    pub fn matches_mcp_target(&self, target: &str, now_epoch_seconds: u64) -> bool {
+        self.is_live_at(now_epoch_seconds)
+            && matches!(self.parsed_scope().kind, ApprovalScopeKind::Mcp)
+            && scope_matches(&self.parsed_scope().pattern, target)
+    }
+
+    pub fn matches_action(&self, action: &str, now_epoch_seconds: u64) -> bool {
+        self.is_live_at(now_epoch_seconds)
+            && matches!(self.parsed_scope().kind, ApprovalScopeKind::Action)
+            && scope_matches(&self.parsed_scope().pattern, action)
+    }
+
+    pub fn matches_rule(&self, rule: &str, now_epoch_seconds: u64) -> bool {
+        self.is_live_at(now_epoch_seconds)
+            && matches!(self.parsed_scope().kind, ApprovalScopeKind::Rule)
+            && scope_matches(&self.parsed_scope().pattern, rule)
+    }
+
+    pub fn matches_once(&self, acp_hash: &str, now_epoch_seconds: u64) -> bool {
+        self.is_live_at(now_epoch_seconds)
+            && matches!(self.parsed_scope().kind, ApprovalScopeKind::Once)
+            && self.parsed_scope().pattern == acp_hash
+    }
+
+    fn parsed_scope(&self) -> ApprovalScope {
+        ApprovalScope::parse(&self.scope)
     }
 }
 
@@ -81,9 +115,57 @@ pub fn has_live_approval_for_target(
     target: &str,
     now_epoch_seconds: u64,
 ) -> Result<bool, MemoryError> {
+    has_live_approval_for_path(path, target, now_epoch_seconds)
+}
+
+pub fn has_live_approval_for_path(
+    path: &Path,
+    target: &str,
+    now_epoch_seconds: u64,
+) -> Result<bool, MemoryError> {
     Ok(load_approvals(path)?
         .iter()
-        .any(|approval| approval.matches_target(target, now_epoch_seconds)))
+        .any(|approval| approval.matches_path_target(target, now_epoch_seconds)))
+}
+
+pub fn has_live_approval_for_mcp(
+    path: &Path,
+    target: &str,
+    now_epoch_seconds: u64,
+) -> Result<bool, MemoryError> {
+    Ok(load_approvals(path)?
+        .iter()
+        .any(|approval| approval.matches_mcp_target(target, now_epoch_seconds)))
+}
+
+pub fn has_live_approval_for_action(
+    path: &Path,
+    action: &str,
+    now_epoch_seconds: u64,
+) -> Result<bool, MemoryError> {
+    Ok(load_approvals(path)?
+        .iter()
+        .any(|approval| approval.matches_action(action, now_epoch_seconds)))
+}
+
+pub fn has_live_approval_for_rule(
+    path: &Path,
+    rule: &str,
+    now_epoch_seconds: u64,
+) -> Result<bool, MemoryError> {
+    Ok(load_approvals(path)?
+        .iter()
+        .any(|approval| approval.matches_rule(rule, now_epoch_seconds)))
+}
+
+pub fn has_live_approval_for_once(
+    path: &Path,
+    acp_hash: &str,
+    now_epoch_seconds: u64,
+) -> Result<bool, MemoryError> {
+    Ok(load_approvals(path)?
+        .iter()
+        .any(|approval| approval.matches_once(acp_hash, now_epoch_seconds)))
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -258,6 +340,52 @@ fn scope_matches(scope: &str, target: &str) -> bool {
     false
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ApprovalScope {
+    kind: ApprovalScopeKind,
+    pattern: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum ApprovalScopeKind {
+    Path,
+    Action,
+    Mcp,
+    Rule,
+    Once,
+}
+
+impl ApprovalScope {
+    fn parse(scope: &str) -> Self {
+        let trimmed = scope.trim();
+        if let Some((prefix, pattern)) = trimmed.split_once(':') {
+            let kind = match prefix {
+                "path" => Some(ApprovalScopeKind::Path),
+                "action" => Some(ApprovalScopeKind::Action),
+                "mcp" => Some(ApprovalScopeKind::Mcp),
+                "rule" => Some(ApprovalScopeKind::Rule),
+                "once" => Some(ApprovalScopeKind::Once),
+                _ => None,
+            };
+            if let Some(kind) = kind {
+                return Self {
+                    kind,
+                    pattern: pattern.trim().to_string(),
+                };
+            }
+        }
+
+        Self {
+            kind: if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+                ApprovalScopeKind::Mcp
+            } else {
+                ApprovalScopeKind::Path
+            },
+            pattern: trimmed.to_string(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum MemoryError {
     Io(std::io::Error),
@@ -309,8 +437,9 @@ mod tests {
     use std::fs;
 
     use super::{
-        append_approval, behavior_count, has_live_approval_for_target, live_approvals,
-        load_asset_policy, match_asset, record_behavior, Approval,
+        append_approval, behavior_count, has_live_approval_for_action, has_live_approval_for_mcp,
+        has_live_approval_for_path, has_live_approval_for_rule, has_live_approval_for_target,
+        live_approvals, load_asset_policy, match_asset, record_behavior, Approval,
     };
 
     #[test]
@@ -337,6 +466,53 @@ mod tests {
         assert!(
             !has_live_approval_for_target(&path, "crates/descry-core/src/lib.rs", 150)
                 .expect("approval does not match")
+        );
+    }
+
+    #[test]
+    fn typed_approvals_are_narrow() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("approvals.jsonl");
+        for scope in [
+            "path:src/auth/**",
+            "mcp:https://prod-mcp.example.com/**",
+            "action:deploy",
+            "rule:mcp-destructive-tool",
+        ] {
+            append_approval(
+                &path,
+                &Approval {
+                    scope: scope.to_string(),
+                    created_at_epoch_seconds: 100,
+                    expires_at_epoch_seconds: 200,
+                    approver: String::from("human"),
+                },
+            )
+            .expect("approval appends");
+        }
+
+        assert!(
+            has_live_approval_for_path(&path, "src/auth/session.rs", 150)
+                .expect("path approval matches")
+        );
+        assert!(
+            !has_live_approval_for_path(&path, "src/billing/invoice.rs", 150)
+                .expect("path approval does not match")
+        );
+        assert!(
+            has_live_approval_for_mcp(&path, "https://prod-mcp.example.com/admin", 150)
+                .expect("mcp approval matches")
+        );
+        assert!(
+            !has_live_approval_for_mcp(&path, "src/auth/session.rs", 150)
+                .expect("path approval does not match mcp")
+        );
+        assert!(
+            has_live_approval_for_action(&path, "deploy", 150).expect("action approval matches")
+        );
+        assert!(
+            has_live_approval_for_rule(&path, "mcp-destructive-tool", 150)
+                .expect("rule approval matches")
         );
     }
 

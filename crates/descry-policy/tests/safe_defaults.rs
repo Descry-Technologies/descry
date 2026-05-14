@@ -20,6 +20,14 @@ fn safe_defaults_match_tier_one_fixtures() {
         ("../../../fixtures/gcloud-sql-delete.json", Decision::Block),
         ("../../../fixtures/db-drop-database.json", Decision::Block),
         ("../../../fixtures/db-truncate-table.json", Decision::Block),
+        (
+            "../../../fixtures/db-delete-without-where.json",
+            Decision::Block,
+        ),
+        (
+            "../../../fixtures/db-delete-with-where.json",
+            Decision::Allow,
+        ),
         ("../../../fixtures/normal-edit.json", Decision::Allow),
         ("../../../fixtures/cargo-test.json", Decision::Allow),
     ];
@@ -72,6 +80,12 @@ fn include_str_by_path(path: &str) -> &'static str {
         }
         "../../../fixtures/db-truncate-table.json" => {
             include_str!("../../../fixtures/db-truncate-table.json")
+        }
+        "../../../fixtures/db-delete-without-where.json" => {
+            include_str!("../../../fixtures/db-delete-without-where.json")
+        }
+        "../../../fixtures/db-delete-with-where.json" => {
+            include_str!("../../../fixtures/db-delete-with-where.json")
         }
         "../../../fixtures/normal-edit.json" => include_str!("../../../fixtures/normal-edit.json"),
         "../../../fixtures/cargo-test.json" => include_str!("../../../fixtures/cargo-test.json"),

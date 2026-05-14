@@ -279,11 +279,13 @@ fn acp(spec: AcpSpec<'_>) -> ActionContextPacket {
             action_type: spec.action_type.to_string(),
             verb: spec.verb.to_string(),
             target: spec.target.to_string(),
+            targets: Vec::new(),
             diff_summary: spec.diff_summary,
             argument_keys: Vec::new(),
         },
         intent: Intent {
             active_task: spec.active_task.map(ToString::to_string),
+            user_prompt: None,
             source: String::from("demo"),
             linked_issue: None,
         },

@@ -12,6 +12,7 @@ pub(crate) struct CompiledHardBlock {
     pub(crate) summary_substrings: Vec<String>,
     pub(crate) argument_key_regex: Option<Regex>,
     pub(crate) argument_key_matches: Vec<String>,
+    pub(crate) sql_delete_without_where: bool,
     pub(crate) reason: String,
 }
 
@@ -41,6 +42,7 @@ impl TryFrom<&HardBlock> for CompiledHardBlock {
             summary_substrings: block.summary_matches.clone(),
             argument_key_regex,
             argument_key_matches: block.argument_key_matches.clone(),
+            sql_delete_without_where: block.sql_delete_without_where,
             reason: block.reason.clone(),
         })
     }
@@ -83,6 +85,7 @@ impl CompiledHardBlock {
                 .any(|regex| regex.is_match(target))
             || summary.is_some_and(|summary| self.matches_summary(summary))
             || self.matches_argument_key(argument_keys)
+            || (self.sql_delete_without_where && has_delete_without_where(target))
     }
 
     fn matches_summary(&self, summary: &str) -> bool {
@@ -108,6 +111,84 @@ impl CompiledHardBlock {
     }
 }
 
+fn has_delete_without_where(text: &str) -> bool {
+    sanitized_sql_statements(text)
+        .into_iter()
+        .any(|statement| statement_contains_delete_without_where(&statement))
+}
+
+fn sanitized_sql_statements(text: &str) -> Vec<String> {
+    strip_sql_comments(text)
+        .split(';')
+        .map(str::trim)
+        .filter(|statement| !statement.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn strip_sql_comments(text: &str) -> String {
+    let mut output = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    let mut in_line_comment = false;
+    let mut in_block_comment = false;
+
+    while let Some(character) = chars.next() {
+        if in_line_comment {
+            if character == '\n' {
+                in_line_comment = false;
+                output.push(' ');
+            }
+            continue;
+        }
+
+        if in_block_comment {
+            if character == '*' && chars.peek() == Some(&'/') {
+                chars.next();
+                in_block_comment = false;
+                output.push(' ');
+            }
+            continue;
+        }
+
+        if character == '-' && chars.peek() == Some(&'-') {
+            chars.next();
+            in_line_comment = true;
+            output.push(' ');
+        } else if character == '/' && chars.peek() == Some(&'*') {
+            chars.next();
+            in_block_comment = true;
+            output.push(' ');
+        } else {
+            output.push(character);
+        }
+    }
+
+    output
+}
+
+fn statement_contains_delete_without_where(statement: &str) -> bool {
+    let lowercase = statement.to_ascii_lowercase();
+    let Some(delete_index) = lowercase.find("delete") else {
+        return false;
+    };
+    let after_delete = &lowercase[delete_index + "delete".len()..];
+    let trimmed = after_delete.trim_start();
+    if !trimmed.starts_with("from") {
+        return false;
+    }
+    let after_from = &trimmed["from".len()..];
+    if after_from.trim().is_empty() {
+        return false;
+    }
+
+    !contains_word(after_from, "where")
+}
+
+fn contains_word(text: &str, word: &str) -> bool {
+    text.split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+        .any(|part| part == word)
+}
+
 #[cfg(test)]
 mod tests {
     use super::match_action;
@@ -127,6 +208,7 @@ mod tests {
             summary_regex: None,
             argument_key_matches: Vec::new(),
             argument_key_regex: None,
+            sql_delete_without_where: false,
             reason: String::from("protected branch update"),
         };
 
@@ -148,6 +230,7 @@ mod tests {
             summary_regex: None,
             argument_key_matches: Vec::new(),
             argument_key_regex: None,
+            sql_delete_without_where: false,
             reason: String::from("bad regex"),
         };
 
@@ -170,6 +253,7 @@ mod tests {
             summary_substrings: Vec::new(),
             argument_key_regex: None,
             argument_key_matches: Vec::new(),
+            sql_delete_without_where: false,
             reason: String::from("production MCP"),
         };
 
@@ -197,6 +281,7 @@ mod tests {
             summary_substrings: vec![String::from("delete_project")],
             argument_key_regex: None,
             argument_key_matches: Vec::new(),
+            sql_delete_without_where: false,
             reason: String::from("destructive MCP tool"),
         };
 
@@ -224,6 +309,7 @@ mod tests {
             summary_substrings: Vec::new(),
             argument_key_regex: None,
             argument_key_matches: vec![String::from("confirm_destroy")],
+            sql_delete_without_where: false,
             reason: String::from("dangerous MCP argument"),
         };
 
@@ -239,5 +325,60 @@ mod tests {
         .expect("block matches");
 
         assert_eq!(matched.id, "mcp-arg");
+    }
+
+    #[test]
+    fn matches_delete_from_without_where() {
+        let block = CompiledHardBlock {
+            id: String::from("sql-delete"),
+            action: String::from("shell.exec"),
+            target_regexes: Vec::new(),
+            target_substrings: Vec::new(),
+            summary_regex: None,
+            summary_substrings: Vec::new(),
+            argument_key_regex: None,
+            argument_key_matches: Vec::new(),
+            sql_delete_without_where: true,
+            reason: String::from("unbounded SQL delete"),
+        };
+
+        let blocks = [block];
+        let matched = match_action(
+            "shell.exec",
+            "psql \"$DATABASE_URL\" -c 'DELETE FROM users'",
+            None,
+            &[],
+            &blocks,
+        )
+        .expect("block matches");
+
+        assert_eq!(matched.id, "sql-delete");
+    }
+
+    #[test]
+    fn allows_delete_from_with_where() {
+        let block = CompiledHardBlock {
+            id: String::from("sql-delete"),
+            action: String::from("shell.exec"),
+            target_regexes: Vec::new(),
+            target_substrings: Vec::new(),
+            summary_regex: None,
+            summary_substrings: Vec::new(),
+            argument_key_regex: None,
+            argument_key_matches: Vec::new(),
+            sql_delete_without_where: true,
+            reason: String::from("unbounded SQL delete"),
+        };
+
+        let blocks = [block];
+        let matched = match_action(
+            "shell.exec",
+            "psql \"$DATABASE_URL\" -c 'DELETE FROM users WHERE id = 42'",
+            None,
+            &[],
+            &blocks,
+        );
+
+        assert!(matched.is_none());
     }
 }

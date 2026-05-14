@@ -53,7 +53,7 @@ struct HookRuntimeConfig {
     session_id: Option<String>,
 }
 
-fn run_install(action: HookInstallAction, output: &mut dyn Write) -> Result<()> {
+pub(crate) fn run_install(action: HookInstallAction, output: &mut dyn Write) -> Result<()> {
     match action {
         HookInstallAction::Claude {
             project,
@@ -151,7 +151,74 @@ fn run_install(action: HookInstallAction, output: &mut dyn Write) -> Result<()> 
             )?;
             Ok(())
         }
+        HookInstallAction::Git {
+            project,
+            hook,
+            command,
+        } => {
+            let hook_path = project.join(".git/hooks").join(&hook);
+            let installed = install_git_hook(&hook_path, &command)?;
+            writeln!(
+                output,
+                "{}",
+                json!({
+                    "host": "git",
+                    "hook": hook,
+                    "path": hook_path,
+                    "command": command,
+                    "installed": installed
+                })
+            )?;
+            Ok(())
+        }
     }
+}
+
+fn install_git_hook(hook_path: &Path, command: &str) -> Result<bool> {
+    let hooks_dir = hook_path.parent().ok_or_else(|| {
+        CliError::new(format!("invalid git hook path {}", hook_path.display()), 2)
+    })?;
+    if !hooks_dir.is_dir() {
+        return Err(CliError::new(
+            format!("missing git hooks directory {}", hooks_dir.display()),
+            2,
+        ));
+    }
+
+    let existing = fs::read_to_string(hook_path).unwrap_or_default();
+    if existing.contains(command) {
+        ensure_executable(hook_path)?;
+        return Ok(false);
+    }
+
+    let mut body = if existing.trim().is_empty() {
+        String::from("#!/usr/bin/env sh\nset -eu\n")
+    } else {
+        let mut existing = existing;
+        if !existing.ends_with('\n') {
+            existing.push('\n');
+        }
+        existing
+    };
+    body.push_str("\n# descry secret scan\n");
+    body.push_str(command);
+    body.push('\n');
+
+    fs::write(hook_path, body)?;
+    ensure_executable(hook_path)?;
+    Ok(true)
+}
+
+fn ensure_executable(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut permissions = fs::metadata(path)?.permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(path, permissions)?;
+    }
+    Ok(())
 }
 
 fn run_claude(
@@ -192,7 +259,7 @@ fn run_claude(
                 },
             )?;
             let permission_decision = claude_permission_decision(&decision.decision);
-            let hook_output = claude_output(permission_decision, decision.reason);
+            let hook_output = claude_output(permission_decision, host_reason(&decision));
             serde_json::to_writer(output, &hook_output)
                 .map_err(|serialize_error| CliError::new(serialize_error.to_string(), 1))?;
             Ok(())
@@ -238,7 +305,7 @@ fn run_codex(
                 },
             )?;
             let permission_decision = codex_permission_decision(&decision.decision);
-            let hook_output = claude_output(permission_decision, decision.reason);
+            let hook_output = claude_output(permission_decision, host_reason(&decision));
             serde_json::to_writer(output, &hook_output)
                 .map_err(|serialize_error| CliError::new(serialize_error.to_string(), 1))?;
             Ok(())
@@ -284,7 +351,7 @@ fn run_cursor(
                 },
             )?;
             let cursor_decision = cursor_permission_decision(&decision.decision);
-            let hook_output = cursor_output(cursor_decision, decision.reason);
+            let hook_output = cursor_output(cursor_decision, host_reason(&decision));
             serde_json::to_writer(output, &hook_output)
                 .map_err(|serialize_error| CliError::new(serialize_error.to_string(), 1))?;
             Ok(())
@@ -320,7 +387,7 @@ fn run_cursor(
                 },
             )?;
             let cursor_decision = cursor_permission_decision(&decision.decision);
-            let hook_output = cursor_output(cursor_decision, decision.reason);
+            let hook_output = cursor_output(cursor_decision, host_reason(&decision));
             serde_json::to_writer(output, &hook_output)
                 .map_err(|serialize_error| CliError::new(serialize_error.to_string(), 1))?;
             Ok(())
@@ -337,6 +404,14 @@ fn read_hook_body(input: &mut dyn Read) -> Result<Vec<u8>> {
 fn parse_hook_error(error: &mut dyn Write, parse_error: serde_json::Error) -> CliError {
     let _ = writeln!(error, "{}", json!({ "error": parse_error.to_string() }));
     CliError::new("", 2)
+}
+
+fn host_reason(decision: &DecisionOutput) -> String {
+    if decision.conditions.is_empty() {
+        decision.reason.clone()
+    } else {
+        format!("{} {}", decision.reason, decision.conditions.join(" "))
+    }
 }
 
 fn evaluate_and_record(
@@ -645,9 +720,7 @@ fn ensure_codex_hooks_feature(config_path: &Path) -> Result<bool> {
     };
     let (updated, changed) = ensure_codex_hooks_feature_body(&body);
     if changed {
-        if let Some(parent) = config_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
+        ensure_parent_dir(config_path)?;
         fs::write(config_path, updated)?;
     }
     Ok(changed)
@@ -737,12 +810,28 @@ fn read_settings(settings_path: &Path) -> Result<Value> {
 }
 
 fn write_settings(settings_path: &Path, settings: &Value) -> Result<()> {
-    if let Some(parent) = settings_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
+    ensure_parent_dir(settings_path)?;
     let body = serde_json::to_string_pretty(settings)
         .map_err(|serialize_error| CliError::new(serialize_error.to_string(), 1))?;
     fs::write(settings_path, format!("{body}\n"))?;
+    Ok(())
+}
+
+fn ensure_parent_dir(path: &Path) -> Result<()> {
+    let Some(parent) = path.parent() else {
+        return Ok(());
+    };
+    if parent.exists() && !parent.is_dir() {
+        return Err(CliError::new(
+            format!(
+                "cannot write {}; parent path {} exists but is not a directory",
+                path.display(),
+                parent.display()
+            ),
+            1,
+        ));
+    }
+    fs::create_dir_all(parent)?;
     Ok(())
 }
 

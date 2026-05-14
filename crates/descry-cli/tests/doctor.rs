@@ -146,6 +146,57 @@ actions: {}
         .any(|check| check["id"] == "project.index" && check["ok"] == true));
 }
 
+#[test]
+fn doctor_fix_initializes_project_and_installs_hooks() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    let project = tempdir.path().join("repo");
+    fs::create_dir_all(project.join("src")).expect("project creates");
+    fs::write(
+        project.join("Cargo.toml"),
+        "[package]\nname = \"repo\"\nversion = \"0.1.0\"\n",
+    )
+    .expect("manifest writes");
+    fs::write(project.join("src/lib.rs"), "").expect("source writes");
+
+    let mut input = [].as_slice();
+    let mut output = Vec::new();
+    let mut error = Vec::new();
+    let cli = Cli {
+        command: Commands::Doctor {
+            project: Some(project.clone()),
+            fix: true,
+            claude_settings: None,
+            codex_hooks: None,
+            codex_config: None,
+            cursor_hooks: None,
+            policy: workspace_root().join("policies/safe-defaults.yml"),
+            audit: project.join(".descry/audit.log"),
+            repo_id_hash: String::from("test-repo"),
+        },
+    };
+
+    let exit_code = match run_with_io(cli, &mut input, &mut output, &mut error) {
+        Ok(()) => 0,
+        Err(error) => error.exit_code(),
+    };
+
+    assert_eq!(exit_code, 0);
+    assert!(error.is_empty());
+    let json: Value = serde_json::from_slice(&output).expect("stdout is json");
+    assert_eq!(json["ok"], true);
+    assert!(project.join(".descry/project.yml").exists());
+    assert!(project.join(".descry/state/project-index.json").exists());
+    assert!(fs::read_to_string(project.join(".claude/settings.json"))
+        .expect("claude settings reads")
+        .contains("descry hook claude pretooluse"));
+    assert!(fs::read_to_string(project.join(".codex/hooks.json"))
+        .expect("codex hooks reads")
+        .contains("descry hook codex pretooluse"));
+    assert!(fs::read_to_string(project.join(".cursor/hooks.json"))
+        .expect("cursor hooks reads")
+        .contains("descry hook cursor before-mcp-execution"));
+}
+
 fn run_doctor(
     settings: &std::path::Path,
     codex_hooks: &std::path::Path,
@@ -158,6 +209,7 @@ fn run_doctor(
     let cli = Cli {
         command: Commands::Doctor {
             project: None,
+            fix: false,
             claude_settings: Some(settings.to_path_buf()),
             codex_hooks: Some(codex_hooks.to_path_buf()),
             codex_config: Some(codex_config.to_path_buf()),
@@ -185,6 +237,7 @@ fn run_project_doctor(project: &std::path::Path) -> (i32, Vec<u8>) {
     let cli = Cli {
         command: Commands::Doctor {
             project: Some(project.to_path_buf()),
+            fix: false,
             claude_settings: None,
             codex_hooks: None,
             codex_config: None,

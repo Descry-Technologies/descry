@@ -1,0 +1,35 @@
+{
+  "actor": {
+    "type": "agent",
+    "name": "claude-code",
+    "owner": "maciej",
+    "trust_level": "local_dev_agent"
+  },
+  "action": {
+    "type": "shell.exec",
+    "verb": "run",
+    "target": "psql \"$DATABASE_URL\" -c \"DELETE FROM users\"",
+    "diff_summary": null
+  },
+  "intent": {
+    "active_task": "DG-015",
+    "source": "user_prompt",
+    "linked_issue": null
+  },
+  "asset": {
+    "type": "local_command",
+    "sensitivity": "high",
+    "environment": "local"
+  },
+  "context": {
+    "repo": "descry",
+    "branch": "main",
+    "recent_files": [],
+    "recent_approvals": []
+  },
+  "blast_radius": {
+    "reversible": false,
+    "customer_impact": "unknown",
+    "financial_impact": "unknown"
+  }
+}

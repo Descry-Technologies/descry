@@ -1,4 +1,7 @@
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+use std::process::Command;
 
 use descry_cli::{run_with_io, Cli, Commands, HookAction, HookInstallAction};
 use serde_json::Value;
@@ -210,11 +213,66 @@ fn hook_install_uses_project_local_paths() {
     );
 }
 
+#[test]
+fn hook_install_git_writes_pre_push_secret_scan() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    git(tempdir.path(), &["init"]);
+    let mut input = [].as_slice();
+    let mut output = Vec::new();
+    let mut error = Vec::new();
+
+    run_with_io(git_cli(tempdir.path()), &mut input, &mut output, &mut error)
+        .expect("git hook install succeeds");
+
+    assert!(error.is_empty());
+    let output_json: Value = serde_json::from_slice(&output).expect("stdout is json");
+    assert_eq!(output_json["host"], "git");
+    assert_eq!(output_json["hook"], "pre-push");
+    assert_eq!(output_json["installed"], true);
+
+    let hook = tempdir.path().join(".git/hooks/pre-push");
+    let body = fs::read_to_string(&hook).expect("hook reads");
+    assert!(body.contains("descry scan secrets --staged"));
+    #[cfg(unix)]
+    assert_ne!(
+        fs::metadata(&hook)
+            .expect("hook metadata")
+            .permissions()
+            .mode()
+            & 0o111,
+        0
+    );
+}
+
+#[test]
+fn hook_install_git_is_idempotent() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    git(tempdir.path(), &["init"]);
+
+    run_git_install(tempdir.path()).expect("first install succeeds");
+    let second = run_git_install(tempdir.path()).expect("second install succeeds");
+
+    let output_json: Value = serde_json::from_slice(&second).expect("stdout is json");
+    assert_eq!(output_json["installed"], false);
+
+    let hook = fs::read_to_string(tempdir.path().join(".git/hooks/pre-push")).expect("hook reads");
+    assert_eq!(hook.matches("descry scan secrets --staged").count(), 1);
+}
+
 fn run_install(settings: &std::path::Path) -> Result<Vec<u8>, descry_cli::CliError> {
     let mut input = [].as_slice();
     let mut output = Vec::new();
     let mut error = Vec::new();
     run_with_io(cli(settings), &mut input, &mut output, &mut error)?;
+    assert!(error.is_empty());
+    Ok(output)
+}
+
+fn run_git_install(project: &std::path::Path) -> Result<Vec<u8>, descry_cli::CliError> {
+    let mut input = [].as_slice();
+    let mut output = Vec::new();
+    let mut error = Vec::new();
+    run_with_io(git_cli(project), &mut input, &mut output, &mut error)?;
     assert!(error.is_empty());
     Ok(output)
 }
@@ -305,4 +363,33 @@ fn project_cursor_cli(project: &std::path::Path) -> Cli {
             },
         },
     }
+}
+
+fn git_cli(project: &std::path::Path) -> Cli {
+    Cli {
+        command: Commands::Hook {
+            action: HookAction::Install {
+                action: HookInstallAction::Git {
+                    project: project.to_path_buf(),
+                    hook: String::from("pre-push"),
+                    command: String::from("descry scan secrets --staged"),
+                },
+            },
+        },
+    }
+}
+
+fn git(cwd: &std::path::Path, args: &[&str]) {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .expect("git runs");
+
+    assert!(
+        output.status.success(),
+        "git {:?} failed: {}",
+        args,
+        String::from_utf8_lossy(&output.stderr)
+    );
 }

@@ -31,19 +31,20 @@ Current capabilities:
 - Local Rust CLI: `descry`
 - Safe-default policy pack for Tier-1 catastrophic actions
 - Claude Code, Codex, and Cursor hook normalization
+- Codex `apply_patch` path extraction without storing patch contents
 - Cursor MCP policy matching by target, tool summary, and safe argument keys
-- Scoped TTL approvals
+- Typed scoped TTL approvals for paths, actions, MCP targets, rules, and one-shot hashes
+- Project asset and action defaults from `.descry/project.yml`
 - Hash-chained local audit log verification
-- Hook installation and doctor checks
+- Hook installation, doctor checks, and `doctor --fix` repair
 - Minimal project initialization with `.descry/project.yml`, state, memory, and index generation
+- Staged and pre-push secret scanning
 - Reproducible launch demos: `in-task-edit`, `off-task-edit`, `secret-access`, `rm-rf`, `mcp-poison`, `prod-delete`, `pocketos`
 
-Not complete yet:
+Alpha limitations:
 
-- packaged installer / Homebrew tap
-- staged secret scanning
-- SQL-aware `DELETE FROM ...` without `WHERE`
-- polished release artifacts
+- published Homebrew tap
+- daemon remains an experimental local HTTP route skeleton, not the full hook runtime path
 
 ## Quickstart From Source
 
@@ -52,10 +53,20 @@ Prerequisites:
 - Rust stable toolchain
 - Git
 
+Install with the source installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/descry-dev/descry/main/scripts/install.sh | sh
+descry init
+descry demo in-task-edit
+```
+
+Or install from a local checkout:
+
 ```bash
 git clone https://github.com/descry-dev/descry.git
 cd descry
-cargo install --path crates/descry-cli
+cargo install --locked --path crates/descry-cli
 descry init --dry-run
 descry demo in-task-edit
 descry demo off-task-edit
@@ -94,7 +105,7 @@ The bundled `policies/safe-defaults.yml` policy currently blocks:
 - Catastrophic `rm -rf` root/home patterns
 - Force pushes to protected branches
 - Destructive Railway, Fly, Vercel, AWS, GCP, and Azure control-plane commands
-- Destructive database operations such as `DROP DATABASE`, `DROP TABLE`, and `TRUNCATE TABLE`
+- Destructive database operations such as `DROP DATABASE`, `DROP TABLE`, `TRUNCATE TABLE`, and `DELETE FROM ...` without `WHERE`
 - Production/admin MCP endpoints
 - Destructive MCP tool names
 - Dangerous MCP confirmation/destruction argument keys, without recording raw argument values
@@ -110,6 +121,8 @@ Examples:
 - `src/auth/session.ts` on branch `fix/session-expiry` maps to normal source work and can be allowed.
 - `.github/workflows/deploy.yml` during that same task maps to high-sensitivity infra and requires approval.
 - `.env.production` maps to critical secrets and is blocked.
+
+Approvals are typed so broad path approvals do not silently apply to MCP or shell hard blocks. Prefer scopes such as `path:src/auth/**`, `action:deploy`, and `mcp:https://prod-mcp.example.com/**`.
 
 ## CLI Surface
 
@@ -127,16 +140,25 @@ descry init
 descry init --dry-run
 descry context build
 descry context show
+descry scan secrets
+descry scan secrets --staged
 descry hook install claude
 descry hook install codex
 descry hook install cursor
+descry hook install git
 descry task set "Fix login session expiry"
 descry task get
 descry task clear
-descry approve --scope "src/auth/**" --ttl 30m
+descry approve --scope "path:src/auth/**" --ttl 30m
+descry approve --scope "action:deploy" --ttl 30m
+descry approve --scope "mcp:https://prod-mcp.example.com/**" --ttl 10m
+descry approvals list
 descry logs verify
+descry logs tail
+descry logs search 'asset:production'
 descry policy test fixtures/railway-delete.json --expect block
 descry doctor
+descry doctor --fix
 ```
 
 Hook targets:
@@ -147,6 +169,14 @@ descry hook codex pretooluse
 descry hook cursor before-shell-execution
 descry hook cursor before-mcp-execution
 ```
+
+Git hook install:
+
+```bash
+descry hook install git
+```
+
+This writes `.git/hooks/pre-push` and runs `descry scan secrets --staged` before pushes.
 
 ## Architecture
 
@@ -194,6 +224,8 @@ Decisions can be written as a hash-chained JSONL audit log. Verify an audit log 
 
 ```bash
 descry logs verify --path .descry/audit.log
+descry logs tail --path .descry/audit.log -n 20
+descry logs search 'destructive' --path .descry/audit.log
 ```
 
 The verifier reports whether the chain is intact or where tampering is detected.
@@ -212,6 +244,14 @@ Run the full local gate:
 cargo fmt --check
 cargo clippy --workspace -- -D warnings
 cargo test --workspace
+```
+
+Build local release artifacts:
+
+```bash
+sh scripts/package.sh 0.1.0
+sh scripts/homebrew_formula.sh 0.1.0
+ls dist/
 ```
 
 Useful focused tests:
