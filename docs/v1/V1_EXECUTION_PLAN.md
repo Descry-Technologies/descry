@@ -100,7 +100,7 @@ cargo test --workspace
 | DG-V1-030 | complete 2026-05-14 | Make init/doctor/hook install clean-machine reliable | DG-V1-040 |
 | DG-V1-040 | complete 2026-05-14 | Introduce shared runtime context spine | DG-V1-050, DG-V1-060, DG-V1-130 |
 | DG-V1-050 | complete 2026-05-14 | Enrich adapter outputs with safe harness metadata | DG-V1-060 |
-| DG-V1-060 | pending | Replace shallow task inference with evidence builder | DG-V1-070 |
+| DG-V1-060 | complete 2026-05-14 | Replace shallow task inference with evidence builder | DG-V1-070 |
 | DG-V1-070 | pending | Add scored task/action context matching | DG-V1-080 |
 | DG-V1-080 | pending | Fix multi-target asset evaluation | DG-V1-090 |
 | DG-V1-090 | pending | Add V1 structural action classifiers | DG-V1-100 |

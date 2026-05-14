@@ -339,6 +339,28 @@ fn claude_pretooluse_multiedit_uses_strictest_target() {
 }
 
 #[test]
+fn claude_pretooluse_bounds_persisted_prompt_context() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    let audit = tempdir.path().join("audit.log");
+    let long_prompt = format!("fix session expiry\n{}", "x".repeat(700));
+    let mut input = claude_write_payload_with_prompt("src/auth/session.ts", &long_prompt);
+    let mut output = Vec::new();
+    let mut error = Vec::new();
+
+    run_with_io(cli(&audit), &mut input, &mut output, &mut error).expect("hook succeeds");
+
+    assert!(error.is_empty());
+    let state_dir = audit.parent().expect("audit has parent").join("state");
+    let recent_events = descry_context::read_recent_events(&state_dir).expect("events read");
+    let stored_prompt = recent_events[0]
+        .user_prompt
+        .as_deref()
+        .expect("prompt is stored");
+    assert!(stored_prompt.len() <= 512);
+    assert!(!stored_prompt.contains('\n'));
+}
+
+#[test]
 fn claude_pretooluse_enriches_context_from_project_index() {
     let tempdir = tempfile::tempdir().expect("tempdir");
     let audit = tempdir.path().join("audit.log");
@@ -478,6 +500,24 @@ fn claude_write_payload(file_path: &str) -> std::io::Cursor<Vec<u8>> {
         "tool_input": {
             "file_path": file_path,
             "content": "content omitted"
+        },
+        "tool_use_id": "toolu_2"
+    });
+    std::io::Cursor::new(serde_json::to_vec(&payload).expect("payload encodes"))
+}
+
+fn claude_write_payload_with_prompt(file_path: &str, prompt: &str) -> std::io::Cursor<Vec<u8>> {
+    let payload = json!({
+        "session_id": "s1",
+        "transcript_path": "/tmp/transcript.jsonl",
+        "cwd": "/repo",
+        "permission_mode": "default",
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": file_path,
+            "content": "content omitted",
+            "user_prompt": prompt
         },
         "tool_use_id": "toolu_2"
     });

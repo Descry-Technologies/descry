@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use descry_core::{
     ActionClass, ActionContextPacket, AssetMatch, ClassifiedAction, Confidence, Decision,
-    DecisionInput, DecisionOutput, RiskScore, RuntimeContextConfig, TaskEnvelope,
+    DecisionInput, DecisionOutput, RiskScore, RuntimeContextConfig, TaskEnvelopeBuilder,
 };
 use descry_policy::{Policy, ProjectPolicy};
 
@@ -100,6 +100,8 @@ pub fn evaluate(input: DecisionInput, runtime: EvaluationRuntime<'_>) -> Decisio
                 .project_config
                 .match_asset(&candidate_input.acp.action.target)
         });
+        candidate_input.task.matched_asset =
+            candidate_input.asset.as_ref().map(|asset| asset.id.clone());
 
         let policy_decision = runtime.policy.evaluate(&candidate_input.acp);
         let decision = apply_decision_layers(policy_decision, &candidate_input, &runtime);
@@ -128,7 +130,9 @@ fn build_decision_input_with_asset(
     acp: ActionContextPacket,
     asset: Option<AssetMatch>,
 ) -> DecisionInput {
-    let task = TaskEnvelope::from_acp(&acp);
+    let task = TaskEnvelopeBuilder::new(&acp)
+        .matched_asset(asset.as_ref().map(|asset| asset.id.clone()))
+        .build();
     let action = classify_action(&acp);
 
     DecisionInput {
@@ -590,23 +594,10 @@ impl TaskContextMatch {
 }
 
 fn task_context_match(input: &DecisionInput) -> TaskContextMatch {
-    let target = input.acp.action.target.to_ascii_lowercase();
-    let paths = input
-        .task
-        .likely_paths
-        .iter()
-        .filter(|path| target == path.to_ascii_lowercase())
-        .cloned()
-        .collect();
-    let terms = input
-        .task
-        .likely_terms
-        .iter()
-        .filter(|term| target.contains(term.as_str()))
-        .cloned()
-        .collect();
-
-    TaskContextMatch { paths, terms }
+    TaskContextMatch {
+        paths: input.task.matched_paths.clone(),
+        terms: input.task.matched_terms.clone(),
+    }
 }
 
 fn match_legacy_asset(asset_policy_path: &Path, target: &str) -> Option<AssetMatch> {

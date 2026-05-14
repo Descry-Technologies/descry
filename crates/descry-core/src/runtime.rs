@@ -122,6 +122,127 @@ impl TaskEnvelope {
     }
 }
 
+pub struct TaskEnvelopeBuilder<'a> {
+    acp: &'a ActionContextPacket,
+    matched_asset: Option<String>,
+    matched_policy: Option<String>,
+}
+
+impl<'a> TaskEnvelopeBuilder<'a> {
+    pub fn new(acp: &'a ActionContextPacket) -> Self {
+        Self {
+            acp,
+            matched_asset: None,
+            matched_policy: None,
+        }
+    }
+
+    pub fn matched_asset(mut self, matched_asset: Option<String>) -> Self {
+        self.matched_asset = matched_asset;
+        self
+    }
+
+    pub fn matched_policy(mut self, matched_policy: Option<String>) -> Self {
+        self.matched_policy = matched_policy;
+        self
+    }
+
+    pub fn build(self) -> TaskEnvelope {
+        let acp = self.acp;
+        let summary = acp
+            .intent
+            .active_task
+            .clone()
+            .or_else(|| acp.intent.user_prompt.clone())
+            .unwrap_or_else(|| inferred_summary(acp));
+        let sources = task_sources(acp);
+        let likely_paths = likely_paths(acp);
+        let likely_terms = likely_terms(acp);
+        let target_text = action_match_text(acp);
+        let mut matched_terms = Vec::new();
+        let mut matched_paths = Vec::new();
+        let mut matched_context_sources = Vec::new();
+
+        collect_term_matches(
+            &mut matched_terms,
+            &mut matched_context_sources,
+            TaskSource::ActiveTask,
+            acp.intent.active_task.as_deref(),
+            &target_text,
+        );
+        collect_term_matches(
+            &mut matched_terms,
+            &mut matched_context_sources,
+            TaskSource::UserPrompt,
+            acp.intent.user_prompt.as_deref(),
+            &target_text,
+        );
+        collect_term_matches(
+            &mut matched_terms,
+            &mut matched_context_sources,
+            TaskSource::Branch,
+            Some(&acp.context.branch),
+            &target_text,
+        );
+        for recent_file in &acp.context.recent_files {
+            if path_matches_target(recent_file, &acp.action.target) {
+                matched_paths.push(recent_file.clone());
+                matched_context_sources.push(TaskSource::RecentFiles);
+            }
+            collect_term_matches(
+                &mut matched_terms,
+                &mut matched_context_sources,
+                TaskSource::RecentFiles,
+                Some(recent_file),
+                &target_text,
+            );
+        }
+
+        matched_terms.sort();
+        matched_terms.dedup();
+        matched_paths.sort();
+        matched_paths.dedup();
+        matched_context_sources.sort_by_key(|source| format!("{source:?}"));
+        matched_context_sources.dedup();
+
+        let confidence = match (
+            acp.intent.active_task.is_some(),
+            acp.intent.user_prompt.is_some(),
+            matched_paths.is_empty(),
+            matched_terms.is_empty(),
+        ) {
+            (true, _, false, _) => 0.85,
+            (true, _, _, false) => 0.75,
+            (_, true, false, false) => 0.7,
+            (_, true, _, false) => 0.6,
+            (_, _, false, _) => 0.5,
+            (_, _, _, false) => 0.4,
+            _ => 0.2,
+        };
+
+        TaskEnvelope {
+            summary,
+            confidence,
+            sources,
+            likely_paths,
+            likely_terms,
+            matched_context_sources,
+            matched_terms,
+            matched_paths,
+            matched_asset: self.matched_asset,
+            matched_policy: self.matched_policy,
+            allowed_action_classes: vec![ActionClass::FileRead, ActionClass::ShellTest],
+            suspicious_action_classes: vec![
+                ActionClass::ShellDelete,
+                ActionClass::GitRewrite,
+                ActionClass::DatabaseDestroy,
+                ActionClass::CloudDelete,
+                ActionClass::McpDestroy,
+            ],
+        }
+    }
+}
+
 fn inferred_summary(acp: &ActionContextPacket) -> String {
     if let Some(prompt) = acp.intent.user_prompt.as_deref() {
         prompt.to_string()
@@ -193,6 +314,43 @@ fn path_terms(path: &str) -> Vec<String> {
         .into_iter()
         .filter(|term| !matches!(term.as_str(), "src" | "tests" | "crates" | "app" | "pages"))
         .collect()
+}
+
+fn action_match_text(acp: &ActionContextPacket) -> String {
+    format!(
+        "{} {}",
+        acp.action.target,
+        acp.action.diff_summary.as_deref().unwrap_or_default()
+    )
+    .to_ascii_lowercase()
+}
+
+fn collect_term_matches(
+    matched_terms: &mut Vec<String>,
+    matched_sources: &mut Vec<TaskSource>,
+    source: TaskSource,
+    value: Option<&str>,
+    target_text: &str,
+) {
+    let Some(value) = value else {
+        return;
+    };
+    for term in split_terms(value) {
+        if term.len() >= 3 && term != "unknown" && target_text.contains(&term) {
+            matched_terms.push(term);
+            matched_sources.push(source.clone());
+        }
+    }
+}
+
+fn path_matches_target(candidate: &str, target: &str) -> bool {
+    if candidate == target {
+        return true;
+    }
+
+    let candidate_dir = candidate.rsplit_once('/').map(|(dir, _)| dir);
+    let target_dir = target.rsplit_once('/').map(|(dir, _)| dir);
+    candidate_dir.is_some() && candidate_dir == target_dir
 }
 
 impl ClassifiedAction {
@@ -269,7 +427,7 @@ pub fn append_runtime_session_event(
         "timestamp_unix": current_epoch_seconds()?,
         "session_id": session_id,
         "harness": acp.actor.name,
-        "user_prompt": acp.intent.user_prompt,
+        "user_prompt": acp.intent.user_prompt.as_deref().map(sanitize_prompt),
         "action_type": acp.action.action_type,
         "target": sanitized_event_target(&acp.action.action_type, &acp.action.target),
         "decision": decision_name(decision),
@@ -412,6 +570,16 @@ fn sanitized_event_target(action_type: &str, target: &str) -> String {
         "mcp.call" => target.to_string(),
         _ => target.to_string(),
     }
+}
+
+fn sanitize_prompt(prompt: &str) -> String {
+    prompt
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(512)
+        .collect()
 }
 
 fn decision_name(decision: &DecisionOutput) -> &'static str {
