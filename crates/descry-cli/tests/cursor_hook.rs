@@ -153,7 +153,7 @@ fn cursor_before_mcp_execution_downgrades_block_with_live_approval() {
     descry_memory::append_approval(
         &approvals,
         &Approval {
-            scope: String::from("https://prod-mcp.example.com/**"),
+            scope: String::from("mcp:https://prod-mcp.example.com/**"),
             created_at_epoch_seconds: 1,
             expires_at_epoch_seconds: u64::MAX,
             approver: String::from("human"),

@@ -257,6 +257,12 @@ pub enum ApprovalsAction {
         #[arg(long, default_value = ".descry/memory/approvals.jsonl")]
         path: PathBuf,
     },
+    Revoke {
+        #[arg(long, default_value = ".descry/memory/approvals.jsonl")]
+        path: PathBuf,
+        #[arg(long)]
+        scope: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]

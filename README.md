@@ -35,7 +35,7 @@ Current capabilities:
 - Claude Code, Codex, and Cursor hook normalization
 - Codex `apply_patch` path extraction without storing patch contents
 - Cursor MCP policy matching by target, tool summary, and safe argument keys
-- Typed scoped TTL approvals for paths, actions, MCP targets, rules, and one-shot hashes
+- Typed scoped TTL approvals for paths, actions, and MCP targets
 - Project asset and action defaults from `.descry/project.yml`
 - Hash-chained local audit log verification
 - Hook installation, doctor checks, and `doctor --fix` repair
@@ -135,7 +135,7 @@ Examples:
 - `.github/workflows/deploy.yml` during that same task maps to high-sensitivity infra and requires approval.
 - `.env.production` maps to critical secrets and is blocked.
 
-Approvals are typed so broad path approvals do not silently apply to MCP or shell hard blocks. Prefer scopes such as `path:src/auth/**`, `action:deploy`, and `mcp:https://prod-mcp.example.com/**`.
+Approvals are typed so broad path approvals do not silently apply to MCP or shell hard blocks. Prefer scopes such as `path:src/auth/**`, `action:deploy`, and `mcp:https://prod-mcp.example.com/**`. Tier-1 shell hard blocks are not generally approvable in V1.
 
 ## CLI Surface
 

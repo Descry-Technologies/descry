@@ -7,6 +7,8 @@ use serde_json::json;
 
 use crate::{ApprovalsAction, CliError, Result};
 
+const MAX_APPROVAL_TTL_SECONDS: u64 = 24 * 60 * 60;
+
 pub fn run(
     scope: String,
     ttl: String,
@@ -16,6 +18,8 @@ pub fn run(
 ) -> Result<()> {
     let now = current_epoch_seconds()?;
     let ttl_seconds = parse_ttl_seconds(&ttl)?;
+    let parsed_scope = descry_memory::validate_approval_scope(&scope)
+        .map_err(|error| CliError::new(error.to_string(), 2))?;
     let approval = Approval {
         scope,
         created_at_epoch_seconds: now,
@@ -30,6 +34,8 @@ pub fn run(
         "{}",
         json!({
             "scope": approval.scope,
+            "scope_kind": parsed_scope.kind.as_str(),
+            "scope_pattern": parsed_scope.pattern,
             "created_at_epoch_seconds": approval.created_at_epoch_seconds,
             "expires_at_epoch_seconds": approval.expires_at_epoch_seconds,
             "approver": approval.approver,
@@ -63,6 +69,23 @@ pub fn run_approvals(action: ApprovalsAction, output: &mut dyn Write) -> Result<
                 json!({
                     "path": path,
                     "approvals": approvals_json
+                })
+            )?;
+            Ok(())
+        }
+        ApprovalsAction::Revoke { path, scope } => {
+            descry_memory::validate_approval_scope(&scope)
+                .map_err(|error| CliError::new(error.to_string(), 2))?;
+            let now = current_epoch_seconds()?;
+            let revoked = descry_memory::revoke_approval_scope(&path, &scope, now)
+                .map_err(|error| CliError::new(error.to_string(), 1))?;
+            writeln!(
+                output,
+                "{}",
+                json!({
+                    "path": path,
+                    "scope": scope,
+                    "revoked": revoked
                 })
             )?;
             Ok(())
@@ -101,7 +124,13 @@ fn parse_ttl_seconds(ttl: &str) -> Result<u64> {
     if value == 0 {
         return Err(CliError::new("ttl must be greater than zero", 2));
     }
-    Ok(value * multiplier)
+    let ttl_seconds = value
+        .checked_mul(multiplier)
+        .ok_or_else(|| CliError::new("ttl is too large", 2))?;
+    if ttl_seconds > MAX_APPROVAL_TTL_SECONDS {
+        return Err(CliError::new("ttl cannot exceed 24h", 2));
+    }
+    Ok(ttl_seconds)
 }
 
 #[cfg(test)]
@@ -126,6 +155,12 @@ mod tests {
         assert_eq!(
             parse_ttl_seconds("soon")
                 .expect_err("invalid suffix fails")
+                .exit_code(),
+            2
+        );
+        assert_eq!(
+            parse_ttl_seconds("25h")
+                .expect_err("ttl cap fails")
                 .exit_code(),
             2
         );

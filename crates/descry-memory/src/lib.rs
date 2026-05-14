@@ -53,7 +53,7 @@ impl Approval {
     }
 
     fn parsed_scope(&self) -> ApprovalScope {
-        ApprovalScope::parse(&self.scope)
+        ApprovalScope::parse_lossy(&self.scope)
     }
 }
 
@@ -63,11 +63,7 @@ pub fn append_approval(path: &Path, approval: &Approval) -> Result<(), MemoryErr
             "approval expiry must be after creation",
         )));
     }
-    if approval.scope.trim().is_empty() {
-        return Err(MemoryError::InvalidApproval(String::from(
-            "approval scope cannot be empty",
-        )));
-    }
+    validate_approval_scope(&approval.scope)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -78,6 +74,29 @@ pub fn append_approval(path: &Path, approval: &Approval) -> Result<(), MemoryErr
     file.flush()?;
     file.sync_data()?;
     Ok(())
+}
+
+pub fn revoke_approval_scope(
+    path: &Path,
+    scope: &str,
+    now_epoch_seconds: u64,
+) -> Result<usize, MemoryError> {
+    validate_approval_scope(scope)?;
+    if !path.exists() {
+        return Ok(0);
+    }
+
+    let mut approvals = load_approvals(path)?;
+    let mut revoked = 0;
+    for approval in &mut approvals {
+        if approval.scope == scope && approval.expires_at_epoch_seconds > now_epoch_seconds {
+            approval.expires_at_epoch_seconds = now_epoch_seconds;
+            revoked += 1;
+        }
+    }
+
+    write_approvals(path, &approvals)?;
+    Ok(revoked)
 }
 
 pub fn load_approvals(path: &Path) -> Result<Vec<Approval>, MemoryError> {
@@ -101,6 +120,24 @@ pub fn load_approvals(path: &Path) -> Result<Vec<Approval>, MemoryError> {
         approvals.push(approval);
     }
     Ok(approvals)
+}
+
+fn write_approvals(path: &Path, approvals: &[Approval]) -> Result<(), MemoryError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(path)?;
+    for approval in approvals {
+        serde_json::to_writer(&mut file, approval)?;
+        file.write_all(b"\n")?;
+    }
+    file.flush()?;
+    file.sync_data()?;
+    Ok(())
 }
 
 pub fn live_approvals(path: &Path, now_epoch_seconds: u64) -> Result<Vec<Approval>, MemoryError> {
@@ -341,13 +378,13 @@ fn scope_matches(scope: &str, target: &str) -> bool {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct ApprovalScope {
-    kind: ApprovalScopeKind,
-    pattern: String,
+pub struct ApprovalScope {
+    pub kind: ApprovalScopeKind,
+    pub pattern: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-enum ApprovalScopeKind {
+pub enum ApprovalScopeKind {
     Path,
     Action,
     Mcp,
@@ -356,34 +393,61 @@ enum ApprovalScopeKind {
 }
 
 impl ApprovalScope {
-    fn parse(scope: &str) -> Self {
-        let trimmed = scope.trim();
-        if let Some((prefix, pattern)) = trimmed.split_once(':') {
-            let kind = match prefix {
-                "path" => Some(ApprovalScopeKind::Path),
-                "action" => Some(ApprovalScopeKind::Action),
-                "mcp" => Some(ApprovalScopeKind::Mcp),
-                "rule" => Some(ApprovalScopeKind::Rule),
-                "once" => Some(ApprovalScopeKind::Once),
-                _ => None,
-            };
-            if let Some(kind) = kind {
-                return Self {
-                    kind,
-                    pattern: pattern.trim().to_string(),
-                };
-            }
-        }
+    fn parse_lossy(scope: &str) -> Self {
+        validate_approval_scope(scope).unwrap_or_else(|_| Self {
+            kind: ApprovalScopeKind::Path,
+            pattern: String::new(),
+        })
+    }
+}
 
-        Self {
-            kind: if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
-                ApprovalScopeKind::Mcp
-            } else {
-                ApprovalScopeKind::Path
-            },
-            pattern: trimmed.to_string(),
+impl ApprovalScopeKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Path => "path",
+            Self::Action => "action",
+            Self::Mcp => "mcp",
+            Self::Rule => "rule",
+            Self::Once => "once",
         }
     }
+}
+
+pub fn validate_approval_scope(scope: &str) -> Result<ApprovalScope, MemoryError> {
+    let trimmed = scope.trim();
+    if trimmed.is_empty() {
+        return Err(MemoryError::InvalidApproval(String::from(
+            "approval scope cannot be empty",
+        )));
+    }
+    let Some((prefix, pattern)) = trimmed.split_once(':') else {
+        return Err(MemoryError::InvalidApproval(String::from(
+            "approval scope must start with path:, action:, mcp:, rule:, or once:",
+        )));
+    };
+    let kind = match prefix {
+        "path" => ApprovalScopeKind::Path,
+        "action" => ApprovalScopeKind::Action,
+        "mcp" => ApprovalScopeKind::Mcp,
+        "rule" => ApprovalScopeKind::Rule,
+        "once" => ApprovalScopeKind::Once,
+        _ => {
+            return Err(MemoryError::InvalidApproval(format!(
+                "unknown approval scope prefix {prefix}"
+            )));
+        }
+    };
+    let pattern = pattern.trim();
+    if pattern.is_empty() {
+        return Err(MemoryError::InvalidApproval(String::from(
+            "approval scope pattern cannot be empty",
+        )));
+    }
+
+    Ok(ApprovalScope {
+        kind,
+        pattern: pattern.to_string(),
+    })
 }
 
 #[derive(Debug)]
@@ -439,7 +503,8 @@ mod tests {
     use super::{
         append_approval, behavior_count, has_live_approval_for_action, has_live_approval_for_mcp,
         has_live_approval_for_path, has_live_approval_for_rule, has_live_approval_for_target,
-        live_approvals, load_asset_policy, match_asset, record_behavior, Approval,
+        live_approvals, load_asset_policy, match_asset, record_behavior, revoke_approval_scope,
+        validate_approval_scope, Approval, ApprovalScopeKind,
     };
 
     #[test]
@@ -447,7 +512,7 @@ mod tests {
         let tempdir = tempfile::tempdir().expect("tempdir");
         let path = tempdir.path().join("approvals.jsonl");
         let approval = Approval {
-            scope: String::from("crates/descry-cli/**"),
+            scope: String::from("path:crates/descry-cli/**"),
             created_at_epoch_seconds: 100,
             expires_at_epoch_seconds: 200,
             approver: String::from("human"),
@@ -467,6 +532,19 @@ mod tests {
             !has_live_approval_for_target(&path, "crates/descry-core/src/lib.rs", 150)
                 .expect("approval does not match")
         );
+    }
+
+    #[test]
+    fn validates_approval_scope_prefixes_and_patterns() {
+        let scope = validate_approval_scope("mcp:https://prod-mcp.example.com/**")
+            .expect("scope validates");
+
+        assert_eq!(scope.kind, ApprovalScopeKind::Mcp);
+        assert_eq!(scope.pattern, "https://prod-mcp.example.com/**");
+        validate_approval_scope("pat:src/**").expect_err("unknown prefix fails");
+        validate_approval_scope("path:").expect_err("empty pattern fails");
+        validate_approval_scope("   ").expect_err("empty scope fails");
+        validate_approval_scope("src/**").expect_err("untyped scope fails");
     }
 
     #[test]
@@ -523,7 +601,7 @@ mod tests {
         append_approval(
             &path,
             &Approval {
-                scope: String::from("*"),
+                scope: String::from("path:*"),
                 created_at_epoch_seconds: 100,
                 expires_at_epoch_seconds: 120,
                 approver: String::from("human"),
@@ -534,6 +612,28 @@ mod tests {
         assert!(live_approvals(&path, 121)
             .expect("approvals load")
             .is_empty());
+    }
+
+    #[test]
+    fn revokes_approval_by_exact_scope() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("approvals.jsonl");
+        append_approval(
+            &path,
+            &Approval {
+                scope: String::from("action:deploy"),
+                created_at_epoch_seconds: 100,
+                expires_at_epoch_seconds: 200,
+                approver: String::from("human"),
+            },
+        )
+        .expect("approval appends");
+
+        let revoked = revoke_approval_scope(&path, "action:deploy", 150).expect("scope revokes");
+
+        assert_eq!(revoked, 1);
+        assert!(!has_live_approval_for_action(&path, "deploy", 151)
+            .expect("approval no longer matches"));
     }
 
     #[test]

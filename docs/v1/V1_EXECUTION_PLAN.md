@@ -105,7 +105,7 @@ cargo test --workspace
 | DG-V1-080 | complete 2026-05-14 | Fix multi-target asset evaluation | DG-V1-090 |
 | DG-V1-090 | complete 2026-05-14 | Add V1 structural action classifiers | DG-V1-100 |
 | DG-V1-100 | complete 2026-05-14 | Stabilize policy DSL and policy test behavior | DG-V1-110 |
-| DG-V1-110 | pending | Make approvals typed, validated, and actually enforced | DG-V1-120 |
+| DG-V1-110 | complete 2026-05-14 | Make approvals typed, validated, and actually enforced | DG-V1-120 |
 | DG-V1-120 | pending | Harden host hook contracts and messages | DG-V1-130 |
 | DG-V1-130 | pending | Complete audit/memory semantics | DG-V1-140 |
 | DG-V1-140 | pending | Make demos reproducible launch tests | DG-V1-150 |
