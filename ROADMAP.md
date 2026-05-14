@@ -33,13 +33,13 @@ V1 launch scope is governed by [docs/V1_LAUNCH_CONTRACT.md](docs/V1_LAUNCH_CONTR
 
 - Publish Homebrew tap repository.
 - Clean-machine README install test outside the development checkout.
-- Complete the DG-V1 ticket sequence in `docs/v1/V1_EXECUTION_PLAN.md`, especially install artifact consumption, hook/doctor reliability, runtime context, task evidence, action classification, approval enforcement, audit semantics, demo gates, false-positive fixtures, daemon stance, and final docs alignment.
+- Tag and publish the first public v0.1 release artifacts.
 
 ## v0.2
 
 - Better asset sensitivity configuration
 - Richer block UX with fix suggestions and override phrase
-- MCP proxy prototype
+- MCP proxy prototype outside the V1 local hook runtime
 - False-positive regression suite against representative repositories
 
 ## Commercial Platform Boundary

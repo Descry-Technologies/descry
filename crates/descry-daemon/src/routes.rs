@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::body::Bytes;
 use axum::http::StatusCode;
@@ -35,7 +36,7 @@ fn evaluate_pretooluse(acp: ActionContextPacket) -> Result<descry_core::Decision
         .map_err(|error| format!("failed to resolve daemon project root: {error}"))?;
     let state_dir = std::env::var_os("DESCRY_DAEMON_STATE_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::temp_dir().join("descry-daemon-state"));
+        .unwrap_or_else(default_state_dir);
     let config = RuntimeContextConfig {
         project_root,
         context_path: PathBuf::from(DEFAULT_CONTEXT),
@@ -50,6 +51,17 @@ fn evaluate_pretooluse(acp: ActionContextPacket) -> Result<descry_core::Decision
         legacy_asset_policy_path: None,
     };
     evaluate_action(acp, &config, None).map(|evaluated| evaluated.decision)
+}
+
+fn default_state_dir() -> PathBuf {
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    std::env::temp_dir().join(format!(
+        "descry-daemon-state-{}-{nonce}",
+        std::process::id()
+    ))
 }
 
 fn workspace_root() -> PathBuf {

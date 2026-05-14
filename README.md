@@ -24,7 +24,7 @@ Descry Guard gives those actions a deterministic preflight check:
 
 ## Status
 
-Alpha. The engine is usable for local demos and policy regression tests, but the public install flow and full v0.1 product surface are still in progress.
+Alpha. The local V1 engine is implemented for source installs, demos, policy regression tests, supported agent hooks, scoped approvals, and local audit verification. Final release publication work remains before a tagged public v0.1.
 
 V1 public claims are tracked in [docs/V1_LAUNCH_CONTRACT.md](docs/V1_LAUNCH_CONTRACT.md) and [docs/V1_CLAIM_MATRIX.md](docs/V1_CLAIM_MATRIX.md).
 
@@ -45,8 +45,11 @@ Current capabilities:
 
 Alpha limitations:
 
-- published Homebrew tap
-- daemon remains an experimental local HTTP route skeleton, not the full hook runtime path
+- Supported agent integrations are Claude Code, Codex, and Cursor; other agents are not V1 hook targets.
+- No published Homebrew tap yet; release artifacts and formula generation exist in this repository.
+- The daemon remains an experimental local HTTP route skeleton, not the full hook runtime path.
+- The open-source repository does not include the future team cloud platform, policy sync, SSO, SIEM export, or managed audit retention.
+- Descry is a user-space preflight and audit tool, not a guarantee against malicious same-user processes.
 
 ## Quickstart
 
@@ -57,6 +60,8 @@ curl -fsSL https://raw.githubusercontent.com/descry-dev/descry/main/scripts/inst
 descry init --all
 descry demo in-task-edit
 ```
+
+The release installer expects published GitHub release artifacts for `DESCRY_VERSION`. Until the first public release is tagged, use the source checkout install below.
 
 Installer settings:
 
@@ -270,6 +275,8 @@ sh scripts/package.sh 0.1.0
 sh scripts/homebrew_formula.sh 0.1.0
 ls dist/
 ```
+
+The repository can generate a Homebrew formula, but a public tap has not been published yet.
 
 Useful focused tests:
 
