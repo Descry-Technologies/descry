@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use descry_core::acp::{Action, Actor, Asset, BlastRadius, Context, Intent};
 use descry_core::ActionContextPacket;
 use serde::Deserialize;
@@ -35,7 +37,7 @@ pub fn normalize_pretooluse(input: &CodexHookInput) -> ActionContextPacket {
             target,
             targets,
             diff_summary: diff_summary_for_tool(input),
-            argument_keys: Vec::new(),
+            argument_keys: safe_argument_keys(&input.tool_input),
         },
         intent: Intent {
             active_task: None,
@@ -66,6 +68,8 @@ fn action_type_for_tool(tool_name: &str) -> &'static str {
     match tool_name {
         "Bash" => "shell.exec",
         "apply_patch" => "file.write",
+        "Read" | "read_file" => "file.read",
+        "Write" | "Edit" | "write_file" => "file.write",
         name if name.starts_with("mcp__") => "mcp.call",
         _ => "sdk.tool.call",
     }
@@ -74,6 +78,7 @@ fn action_type_for_tool(tool_name: &str) -> &'static str {
 fn verb_for_action_type(action_type: &str) -> &'static str {
     match action_type {
         "shell.exec" => "run",
+        "file.read" => "read",
         "file.write" => "modify",
         "mcp.call" => "call",
         _ => "call",
@@ -83,6 +88,7 @@ fn verb_for_action_type(action_type: &str) -> &'static str {
 fn asset_type_for_action_type(action_type: &str) -> &'static str {
     match action_type {
         "shell.exec" => "local_command",
+        "file.read" => "code_file",
         "file.write" => "code_file",
         "mcp.call" => "mcp_tool",
         _ => "tool_call",
@@ -96,6 +102,12 @@ fn target_for_tool(input: &CodexHookInput) -> String {
             .first()
             .cloned()
             .unwrap_or_else(|| String::from("apply_patch")),
+        "Read" | "Write" | "Edit" | "read_file" | "write_file" => {
+            string_field(&input.tool_input, "file_path")
+                .or_else(|| string_field(&input.tool_input, "path"))
+                .unwrap_or_default()
+        }
+        name if name.starts_with("mcp__") => mcp_target(name),
         _ => input.tool_name.clone(),
     }
 }
@@ -103,6 +115,11 @@ fn target_for_tool(input: &CodexHookInput) -> String {
 fn targets_for_tool(input: &CodexHookInput, target: &str) -> Vec<String> {
     if input.tool_name == "apply_patch" {
         extract_patch_paths(input)
+    } else if matches!(
+        input.tool_name.as_str(),
+        "Read" | "Write" | "Edit" | "read_file" | "write_file"
+    ) {
+        vec![target.to_string()]
     } else {
         vec![target.to_string()]
     }
@@ -111,6 +128,13 @@ fn targets_for_tool(input: &CodexHookInput, target: &str) -> Vec<String> {
 fn diff_summary_for_tool(input: &CodexHookInput) -> Option<String> {
     if input.tool_name == "apply_patch" {
         Some(String::from("Codex apply_patch content omitted"))
+    } else if input.tool_name.starts_with("mcp__") {
+        Some(format!(
+            "Codex MCP tool call: {}",
+            mcp_tool_name(&input.tool_name)
+        ))
+    } else if matches!(input.tool_name.as_str(), "Write" | "Edit" | "write_file") {
+        Some(String::from("Codex file content omitted"))
     } else {
         None
     }
@@ -126,6 +150,77 @@ fn string_field(value: &Value, field: &str) -> Option<String> {
 fn prompt_for_hook(input: &CodexHookInput) -> Option<String> {
     string_field(&input.tool_input, "user_prompt")
         .or_else(|| string_field(&input.tool_input, "prompt"))
+}
+
+fn mcp_target(tool_name: &str) -> String {
+    let parts = tool_name.split("__").collect::<Vec<_>>();
+    if parts.len() >= 3 {
+        format!("{}:{}", parts[1], parts[2..].join("__"))
+    } else {
+        tool_name.to_string()
+    }
+}
+
+fn mcp_tool_name(tool_name: &str) -> String {
+    let name = tool_name.split("__").skip(2).collect::<Vec<_>>().join("__");
+    if name.is_empty() {
+        tool_name.to_string()
+    } else {
+        name
+    }
+}
+
+fn safe_argument_keys(value: &Value) -> Vec<String> {
+    let mut keys = BTreeSet::new();
+    for field in [
+        "arguments",
+        "args",
+        "parameters",
+        "params",
+        "input",
+        "tool_input",
+    ] {
+        if let Some(arguments) = value.get(field) {
+            collect_argument_keys(arguments, &mut keys);
+        }
+    }
+    collect_argument_keys(value, &mut keys);
+    for container in [
+        "arguments",
+        "args",
+        "parameters",
+        "params",
+        "input",
+        "tool_input",
+    ] {
+        keys.remove(container);
+    }
+    keys.into_iter().collect()
+}
+
+fn collect_argument_keys(value: &Value, keys: &mut BTreeSet<String>) {
+    let Some(arguments) = value.as_object() else {
+        return;
+    };
+
+    for key in arguments.keys() {
+        if is_safe_argument_key(key) {
+            keys.insert(key.clone());
+        }
+    }
+}
+
+fn is_safe_argument_key(key: &str) -> bool {
+    let lowercase = key.to_ascii_lowercase();
+    !key.is_empty()
+        && key.len() <= 64
+        && !lowercase.contains("secret")
+        && !lowercase.contains("token")
+        && !lowercase.contains("password")
+        && !lowercase.contains("passwd")
+        && key
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'))
 }
 
 fn extract_patch_paths(input: &CodexHookInput) -> Vec<String> {
@@ -218,5 +313,60 @@ mod tests {
             acp.action.diff_summary.as_deref(),
             Some("Codex apply_patch content omitted")
         );
+    }
+
+    #[test]
+    fn normalizes_mcp_call_with_safe_argument_keys() {
+        let input = CodexHookInput {
+            session_id: String::from("s1"),
+            cwd: Some(String::from("/repo")),
+            hook_event_name: String::from("PreToolUse"),
+            tool_name: String::from("mcp__prod__delete_project"),
+            tool_input: json!({
+                "arguments": {
+                    "project_id": "prod-123",
+                    "confirm_destroy": true,
+                    "password": "ignored"
+                }
+            }),
+            tool_use_id: Some(String::from("toolu_1")),
+            model: Some(String::from("gpt-5.5")),
+            turn_id: Some(String::from("t1")),
+        };
+
+        let acp = normalize_pretooluse(&input);
+
+        assert_eq!(acp.action.action_type, "mcp.call");
+        assert_eq!(acp.action.target, "prod:delete_project");
+        assert_eq!(
+            acp.action.diff_summary.as_deref(),
+            Some("Codex MCP tool call: delete_project")
+        );
+        assert_eq!(
+            acp.action.argument_keys,
+            vec![String::from("confirm_destroy"), String::from("project_id")]
+        );
+        let serialized = serde_json::to_string(&acp).expect("acp serializes");
+        assert!(!serialized.contains("prod-123"));
+        assert!(!serialized.contains("ignored"));
+    }
+
+    #[test]
+    fn normalizes_file_read_write_tool_payloads() {
+        let input = CodexHookInput {
+            session_id: String::from("s1"),
+            cwd: Some(String::from("/repo")),
+            hook_event_name: String::from("PreToolUse"),
+            tool_name: String::from("Read"),
+            tool_input: json!({ "path": "src/lib.rs" }),
+            tool_use_id: Some(String::from("toolu_1")),
+            model: Some(String::from("gpt-5.5")),
+            turn_id: Some(String::from("t1")),
+        };
+
+        let acp = normalize_pretooluse(&input);
+
+        assert_eq!(acp.action.action_type, "file.read");
+        assert_eq!(acp.action.target, "src/lib.rs");
     }
 }

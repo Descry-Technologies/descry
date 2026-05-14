@@ -7,6 +7,8 @@ use serde_json::{Map, Value};
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct CursorShellHookInput {
+    #[serde(default)]
+    pub session_id: Option<String>,
     pub cwd: Option<String>,
     #[serde(default)]
     pub command: Option<String>,
@@ -16,6 +18,8 @@ pub struct CursorShellHookInput {
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct CursorMcpHookInput {
+    #[serde(default)]
+    pub session_id: Option<String>,
     pub cwd: Option<String>,
     #[serde(default)]
     pub command: Option<String>,
@@ -207,8 +211,13 @@ fn collect_argument_keys(value: &Value, keys: &mut BTreeSet<String>) {
 }
 
 fn is_safe_argument_key(key: &str) -> bool {
+    let lowercase = key.to_ascii_lowercase();
     !key.is_empty()
         && key.len() <= 64
+        && !lowercase.contains("secret")
+        && !lowercase.contains("token")
+        && !lowercase.contains("password")
+        && !lowercase.contains("passwd")
         && key
             .chars()
             .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'))
@@ -226,6 +235,7 @@ mod tests {
     #[test]
     fn normalizes_before_shell_execution() {
         let input = CursorShellHookInput {
+            session_id: Some(String::from("s1")),
             cwd: Some(String::from("/repo")),
             command: None,
             tool_input: json!({ "command": "rm -rf ~" }),
@@ -241,6 +251,7 @@ mod tests {
     #[test]
     fn normalizes_before_mcp_execution() {
         let input = CursorMcpHookInput {
+            session_id: Some(String::from("s1")),
             cwd: Some(String::from("/repo")),
             command: None,
             url: Some(String::from("https://mcp.example.com/mcp")),
@@ -265,6 +276,7 @@ mod tests {
     #[test]
     fn normalizes_mcp_argument_keys_without_values() {
         let input = CursorMcpHookInput {
+            session_id: Some(String::from("s1")),
             cwd: Some(String::from("/repo")),
             command: None,
             url: Some(String::from("https://mcp.example.com/mcp")),
@@ -275,6 +287,7 @@ mod tests {
                 "arguments": {
                     "project_id": "prod-123",
                     "confirm_destroy": true,
+                    "api_token": "ignored",
                     "unsafe key": "ignored"
                 }
             }),
@@ -289,5 +302,6 @@ mod tests {
         );
         let serialized = serde_json::to_string(&acp).expect("acp serializes");
         assert!(!serialized.contains("prod-123"));
+        assert!(!serialized.contains("api_token"));
     }
 }

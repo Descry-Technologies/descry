@@ -1,6 +1,8 @@
 use descry_core::acp::{Action, Actor, Asset, BlastRadius, Context, Intent};
 use descry_core::ActionContextPacket;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
+
 use serde_json::Value;
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -47,9 +49,9 @@ pub fn normalize_pretooluse(input: &ClaudeHookInput) -> ActionContextPacket {
             action_type: String::from(action_type),
             verb: String::from(verb),
             target,
-            targets: Vec::new(),
+            targets: targets_for_tool(input),
             diff_summary: diff_summary_for_tool(input),
-            argument_keys: Vec::new(),
+            argument_keys: safe_argument_keys(&input.tool_input),
         },
         intent: Intent {
             active_task: None,
@@ -121,8 +123,17 @@ fn target_for_tool(input: &ClaudeHookInput) -> String {
         "Read" | "Write" | "Edit" | "MultiEdit" => {
             string_field(&input.tool_input, "file_path").unwrap_or_default()
         }
+        name if name.starts_with("mcp__") => mcp_target(name),
         _ => input.tool_name.clone(),
     }
+}
+
+fn targets_for_tool(input: &ClaudeHookInput) -> Vec<String> {
+    let mut paths = safe_path_list(&input.tool_input);
+    if paths.is_empty() {
+        paths.push(target_for_tool(input));
+    }
+    paths
 }
 
 fn diff_summary_for_tool(input: &ClaudeHookInput) -> Option<String> {
@@ -130,6 +141,9 @@ fn diff_summary_for_tool(input: &ClaudeHookInput) -> Option<String> {
         "Write" => Some(String::from("Claude Write tool content omitted")),
         "Edit" => Some(String::from("Claude Edit tool string replacement omitted")),
         "MultiEdit" => Some(String::from("Claude MultiEdit tool changes omitted")),
+        name if name.starts_with("mcp__") => {
+            Some(format!("Claude MCP tool call: {}", mcp_tool_name(name)))
+        }
         _ => None,
     }
 }
@@ -144,6 +158,111 @@ fn string_field(value: &Value, field: &str) -> Option<String> {
 fn prompt_for_hook(input: &ClaudeHookInput) -> Option<String> {
     string_field(&input.tool_input, "user_prompt")
         .or_else(|| string_field(&input.tool_input, "prompt"))
+}
+
+fn mcp_target(tool_name: &str) -> String {
+    let parts = tool_name.split("__").collect::<Vec<_>>();
+    if parts.len() >= 3 {
+        format!("{}:{}", parts[1], parts[2..].join("__"))
+    } else {
+        tool_name.to_string()
+    }
+}
+
+fn mcp_tool_name(tool_name: &str) -> String {
+    tool_name
+        .split("__")
+        .skip(2)
+        .collect::<Vec<_>>()
+        .join("__")
+        .trim()
+        .to_string()
+        .if_empty_then(tool_name)
+}
+
+trait IfEmptyThen {
+    fn if_empty_then(self, fallback: &str) -> String;
+}
+
+impl IfEmptyThen for String {
+    fn if_empty_then(self, fallback: &str) -> String {
+        if self.is_empty() {
+            fallback.to_string()
+        } else {
+            self
+        }
+    }
+}
+
+fn safe_argument_keys(value: &Value) -> Vec<String> {
+    let mut keys = BTreeSet::new();
+    for field in [
+        "arguments",
+        "args",
+        "parameters",
+        "params",
+        "input",
+        "tool_input",
+    ] {
+        if let Some(arguments) = value.get(field) {
+            collect_argument_keys(arguments, &mut keys);
+        }
+    }
+    collect_argument_keys(value, &mut keys);
+    for container in [
+        "arguments",
+        "args",
+        "parameters",
+        "params",
+        "input",
+        "tool_input",
+    ] {
+        keys.remove(container);
+    }
+    keys.into_iter().collect()
+}
+
+fn collect_argument_keys(value: &Value, keys: &mut BTreeSet<String>) {
+    let Some(arguments) = value.as_object() else {
+        return;
+    };
+
+    for key in arguments.keys() {
+        if is_safe_argument_key(key) {
+            keys.insert(key.clone());
+        }
+    }
+}
+
+fn safe_path_list(value: &Value) -> Vec<String> {
+    let mut paths = Vec::new();
+    if let Some(path) = string_field(value, "file_path") {
+        paths.push(path);
+    }
+    if let Some(edits) = value.get("edits").and_then(Value::as_array) {
+        for edit in edits {
+            if let Some(path) = string_field(edit, "file_path") {
+                paths.push(path);
+            }
+        }
+    }
+    paths.retain(|path| !path.trim().is_empty());
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+fn is_safe_argument_key(key: &str) -> bool {
+    let lowercase = key.to_ascii_lowercase();
+    !key.is_empty()
+        && key.len() <= 64
+        && !lowercase.contains("secret")
+        && !lowercase.contains("token")
+        && !lowercase.contains("password")
+        && !lowercase.contains("passwd")
+        && key
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'))
 }
 
 #[cfg(test)]
@@ -190,5 +309,67 @@ mod tests {
             acp.action.diff_summary.as_deref(),
             Some("Claude Write tool content omitted")
         );
+    }
+
+    #[test]
+    fn normalizes_mcp_call_with_safe_argument_keys() {
+        let input = ClaudeHookInput {
+            session_id: String::from("s1"),
+            cwd: Some(String::from("/repo")),
+            hook_event_name: String::from("PreToolUse"),
+            tool_name: String::from("mcp__prod__delete_project"),
+            tool_input: json!({
+                "arguments": {
+                    "project_id": "prod-123",
+                    "confirm_destroy": true,
+                    "api_token": "redacted"
+                }
+            }),
+            tool_use_id: None,
+        };
+
+        let acp = normalize_pretooluse(&input);
+
+        assert_eq!(acp.action.action_type, "mcp.call");
+        assert_eq!(acp.action.target, "prod:delete_project");
+        assert_eq!(
+            acp.action.diff_summary.as_deref(),
+            Some("Claude MCP tool call: delete_project")
+        );
+        assert_eq!(
+            acp.action.argument_keys,
+            vec![String::from("confirm_destroy"), String::from("project_id")]
+        );
+        let serialized = serde_json::to_string(&acp).expect("acp serializes");
+        assert!(!serialized.contains("prod-123"));
+        assert!(!serialized.contains("redacted"));
+    }
+
+    #[test]
+    fn normalizes_multiedit_paths_without_edit_content() {
+        let input = ClaudeHookInput {
+            session_id: String::from("s1"),
+            cwd: Some(String::from("/repo")),
+            hook_event_name: String::from("PreToolUse"),
+            tool_name: String::from("MultiEdit"),
+            tool_input: json!({
+                "file_path": ".env.production",
+                "edits": [
+                    { "file_path": "src/lib.rs", "old_string": "secret", "new_string": "safe" }
+                ]
+            }),
+            tool_use_id: None,
+        };
+
+        let acp = normalize_pretooluse(&input);
+
+        assert_eq!(acp.action.target, ".env.production");
+        assert_eq!(
+            acp.action.targets,
+            vec![String::from(".env.production"), String::from("src/lib.rs")]
+        );
+        let serialized = serde_json::to_string(&acp).expect("acp serializes");
+        assert!(!serialized.contains("old_string"));
+        assert!(!serialized.contains("secret"));
     }
 }

@@ -36,6 +36,32 @@ fn codex_pretooluse_blocks_rm_rf_home_and_writes_audit() {
     assert!(!audit_body.contains("rm -rf ~"));
 }
 
+#[test]
+fn codex_pretooluse_blocks_destructive_mcp_tool() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    let audit = tempdir.path().join("audit.log");
+    let mut input = codex_mcp_payload("mcp__prod__delete_project");
+    let mut output = Vec::new();
+    let mut error = Vec::new();
+
+    run_with_io(cli(&audit), &mut input, &mut output, &mut error).expect("hook succeeds");
+
+    assert!(error.is_empty());
+    let output_json: Value = serde_json::from_slice(&output).expect("stdout is json");
+    assert_eq!(
+        output_json["hookSpecificOutput"]["permissionDecision"],
+        "deny"
+    );
+    assert!(
+        output_json["hookSpecificOutput"]["permissionDecisionReason"]
+            .as_str()
+            .expect("reason is string")
+            .contains("mcp")
+    );
+    let audit_body = fs::read_to_string(&audit).expect("audit log reads");
+    assert!(!audit_body.contains("prod-123"));
+}
+
 fn cli(audit: &std::path::Path) -> Cli {
     Cli {
         command: Commands::Hook {
@@ -85,6 +111,26 @@ fn codex_bash_payload(command: &str) -> std::io::Cursor<Vec<u8>> {
         "tool_name": "Bash",
         "tool_input": { "command": command },
         "tool_use_id": "toolu_1",
+        "model": "gpt-5.5",
+        "turn_id": "turn_1"
+    });
+    std::io::Cursor::new(serde_json::to_vec(&payload).expect("payload encodes"))
+}
+
+fn codex_mcp_payload(tool_name: &str) -> std::io::Cursor<Vec<u8>> {
+    let payload = json!({
+        "session_id": "s1",
+        "cwd": "/repo",
+        "hook_event_name": "PreToolUse",
+        "tool_name": tool_name,
+        "tool_input": {
+            "arguments": {
+                "project_id": "prod-123",
+                "confirm_destroy": true,
+                "password": "redacted"
+            }
+        },
+        "tool_use_id": "toolu_2",
         "model": "gpt-5.5",
         "turn_id": "turn_1"
     });

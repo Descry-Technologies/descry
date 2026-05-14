@@ -286,6 +286,59 @@ fn claude_pretooluse_uses_project_defaults_for_secret_write() {
 }
 
 #[test]
+fn claude_pretooluse_blocks_destructive_mcp_tool() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    let audit = tempdir.path().join("audit.log");
+    let mut input = claude_mcp_payload("mcp__prod__delete_project");
+    let mut output = Vec::new();
+    let mut error = Vec::new();
+
+    run_with_io(cli(&audit), &mut input, &mut output, &mut error).expect("hook succeeds");
+
+    assert!(error.is_empty());
+    let output_json: Value = serde_json::from_slice(&output).expect("stdout is json");
+    assert_eq!(
+        output_json["hookSpecificOutput"]["permissionDecision"],
+        "deny"
+    );
+    assert!(
+        output_json["hookSpecificOutput"]["permissionDecisionReason"]
+            .as_str()
+            .expect("reason is string")
+            .contains("mcp")
+    );
+    let audit_body = fs::read_to_string(&audit).expect("audit log reads");
+    assert!(!audit_body.contains("prod-123"));
+}
+
+#[test]
+fn claude_pretooluse_multiedit_uses_strictest_target() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    let audit = tempdir.path().join("audit.log");
+    let mut input = claude_multiedit_payload();
+    let mut output = Vec::new();
+    let mut error = Vec::new();
+
+    run_with_io(cli(&audit), &mut input, &mut output, &mut error).expect("hook succeeds");
+
+    assert!(error.is_empty());
+    let output_json: Value = serde_json::from_slice(&output).expect("stdout is json");
+    assert_eq!(
+        output_json["hookSpecificOutput"]["permissionDecision"],
+        "deny"
+    );
+    assert!(
+        output_json["hookSpecificOutput"]["permissionDecisionReason"]
+            .as_str()
+            .expect("reason is string")
+            .contains("asset: secrets")
+    );
+    let audit_body = fs::read_to_string(&audit).expect("audit log reads");
+    assert!(!audit_body.contains("old secret"));
+    assert!(!audit_body.contains("new secret"));
+}
+
+#[test]
 fn claude_pretooluse_enriches_context_from_project_index() {
     let tempdir = tempfile::tempdir().expect("tempdir");
     let audit = tempdir.path().join("audit.log");
@@ -427,6 +480,49 @@ fn claude_write_payload(file_path: &str) -> std::io::Cursor<Vec<u8>> {
             "content": "content omitted"
         },
         "tool_use_id": "toolu_2"
+    });
+    std::io::Cursor::new(serde_json::to_vec(&payload).expect("payload encodes"))
+}
+
+fn claude_mcp_payload(tool_name: &str) -> std::io::Cursor<Vec<u8>> {
+    let payload = json!({
+        "session_id": "s1",
+        "transcript_path": "/tmp/transcript.jsonl",
+        "cwd": "/repo",
+        "permission_mode": "default",
+        "hook_event_name": "PreToolUse",
+        "tool_name": tool_name,
+        "tool_input": {
+            "arguments": {
+                "project_id": "prod-123",
+                "confirm_destroy": true,
+                "api_token": "redacted"
+            }
+        },
+        "tool_use_id": "toolu_3"
+    });
+    std::io::Cursor::new(serde_json::to_vec(&payload).expect("payload encodes"))
+}
+
+fn claude_multiedit_payload() -> std::io::Cursor<Vec<u8>> {
+    let payload = json!({
+        "session_id": "s1",
+        "transcript_path": "/tmp/transcript.jsonl",
+        "cwd": "/repo",
+        "permission_mode": "default",
+        "hook_event_name": "PreToolUse",
+        "tool_name": "MultiEdit",
+        "tool_input": {
+            "file_path": ".env.production",
+            "edits": [
+                {
+                    "file_path": "src/auth/session.ts",
+                    "old_string": "old secret",
+                    "new_string": "new secret"
+                }
+            ]
+        },
+        "tool_use_id": "toolu_4"
     });
     std::io::Cursor::new(serde_json::to_vec(&payload).expect("payload encodes"))
 }
