@@ -176,7 +176,6 @@ fn match_runtime_asset(
 pub fn classify_action(acp: &ActionContextPacket) -> ClassifiedAction {
     let action_type = acp.action.action_type.as_str();
     let target = acp.action.target.trim();
-    let lowercase_target = target.to_ascii_lowercase();
 
     let class = if action_type == "file.write" {
         ActionClass::FileWrite
@@ -187,7 +186,7 @@ pub fn classify_action(acp: &ActionContextPacket) -> ClassifiedAction {
     } else if action_type == "mcp.call" {
         classify_mcp(acp)
     } else if action_type == "shell.exec" {
-        classify_shell(&lowercase_target)
+        classify_shell(target)
     } else {
         ActionClass::Unknown
     };
@@ -209,61 +208,193 @@ pub fn classify_action(acp: &ActionContextPacket) -> ClassifiedAction {
     }
 }
 
-fn classify_shell(lowercase_target: &str) -> ActionClass {
-    if lowercase_target.starts_with("git status")
-        || lowercase_target.starts_with("git diff")
-        || lowercase_target.starts_with("git log")
+fn classify_shell(target: &str) -> ActionClass {
+    let lowercase_target = target.to_ascii_lowercase();
+    let tokens = shell_tokens(target).unwrap_or_else(|| {
+        lowercase_target
+            .split_whitespace()
+            .map(ToString::to_string)
+            .collect()
+    });
+    let lowercase_tokens = tokens
+        .iter()
+        .map(|token| token.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+
+    if let Some(class) = classify_git(&lowercase_tokens) {
+        return class;
+    }
+    if classify_database_destroy(&lowercase_target) {
+        return ActionClass::DatabaseDestroy;
+    }
+    if classify_cloud_delete(&lowercase_tokens, &lowercase_target) {
+        return ActionClass::CloudDelete;
+    }
+    if classify_deploy(&lowercase_tokens, &lowercase_target) {
+        return ActionClass::Deploy;
+    }
+
+    if command_starts_with(&lowercase_tokens, &["git", "status"])
+        || command_starts_with(&lowercase_tokens, &["git", "diff"])
+        || command_starts_with(&lowercase_tokens, &["git", "log"])
     {
         ActionClass::GitRead
-    } else if lowercase_target.starts_with("git push")
-        && (lowercase_target.contains(" --force")
-            || lowercase_target.contains(" -f ")
-            || lowercase_target.contains(" --force-with-lease"))
-    {
-        ActionClass::GitRewrite
-    } else if lowercase_target.starts_with("cargo test")
-        || lowercase_target.starts_with("npm test")
-        || lowercase_target.starts_with("npm run test")
-        || lowercase_target.starts_with("pytest")
+    } else if command_starts_with(&lowercase_tokens, &["cargo", "test"])
+        || command_starts_with(&lowercase_tokens, &["npm", "test"])
+        || command_starts_with(&lowercase_tokens, &["npm", "run", "test"])
+        || command_starts_with(&lowercase_tokens, &["pytest"])
     {
         ActionClass::ShellTest
-    } else if lowercase_target.starts_with("cargo build")
-        || lowercase_target.starts_with("npm run build")
-        || lowercase_target.starts_with("go build")
+    } else if command_starts_with(&lowercase_tokens, &["cargo", "build"])
+        || command_starts_with(&lowercase_tokens, &["npm", "run", "build"])
+        || command_starts_with(&lowercase_tokens, &["go", "build"])
     {
         ActionClass::ShellBuild
-    } else if lowercase_target.starts_with("npm install")
-        || lowercase_target.starts_with("pnpm install")
-        || lowercase_target.starts_with("yarn install")
-        || lowercase_target.starts_with("cargo install")
+    } else if command_starts_with(&lowercase_tokens, &["npm", "install"])
+        || command_starts_with(&lowercase_tokens, &["pnpm", "install"])
+        || command_starts_with(&lowercase_tokens, &["yarn", "install"])
+        || command_starts_with(&lowercase_tokens, &["cargo", "install"])
     {
         ActionClass::ShellInstall
     } else if lowercase_target.contains("rm -rf")
         || lowercase_target.contains("find ") && lowercase_target.contains(" -delete")
     {
         ActionClass::ShellDelete
-    } else if lowercase_target.contains("drop database")
-        || lowercase_target.contains("drop table")
-        || lowercase_target.contains("truncate table")
-        || lowercase_target.contains("db.dropdatabase")
-    {
-        ActionClass::DatabaseDestroy
-    } else if lowercase_target.contains("railway volume delete")
-        || lowercase_target.contains("fly apps destroy")
-        || lowercase_target.contains("fly volumes destroy")
-        || lowercase_target.contains("aws rds delete-db-")
-        || lowercase_target.contains("gcloud sql instances delete")
-        || lowercase_target.contains("az group delete")
-    {
-        ActionClass::CloudDelete
-    } else if lowercase_target.contains(" deploy")
-        || lowercase_target.starts_with("deploy")
-        || lowercase_target.contains("vercel --prod")
-    {
-        ActionClass::Deploy
     } else {
         ActionClass::Unknown
     }
+}
+
+fn shell_tokens(command: &str) -> Option<Vec<String>> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut chars = command.chars().peekable();
+    let mut quote = None;
+
+    while let Some(character) = chars.next() {
+        match (character, quote) {
+            ('\\', Some('\'')) => current.push(character),
+            ('\\', _) => {
+                if let Some(next) = chars.next() {
+                    current.push(next);
+                }
+            }
+            ('\'' | '"', None) => quote = Some(character),
+            (candidate, Some(active_quote)) if candidate == active_quote => quote = None,
+            (character, None) if character.is_whitespace() => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+            }
+            (character, _) => current.push(character),
+        }
+    }
+
+    if quote.is_some() {
+        return None;
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    Some(tokens)
+}
+
+fn classify_git(tokens: &[String]) -> Option<ActionClass> {
+    if command_starts_with(tokens, &["git", "reset"])
+        && tokens.iter().any(|token| token == "--hard")
+    {
+        return Some(ActionClass::GitRewrite);
+    }
+    if command_starts_with(tokens, &["git", "clean"])
+        && tokens.iter().any(|token| git_clean_forces_delete(token))
+    {
+        return Some(ActionClass::GitRewrite);
+    }
+    if command_starts_with(tokens, &["git", "push"])
+        && tokens.iter().any(|token| is_git_force_flag(token))
+        && tokens.iter().any(|token| is_protected_branch(token))
+    {
+        return Some(ActionClass::GitRewrite);
+    }
+
+    None
+}
+
+fn git_clean_forces_delete(token: &str) -> bool {
+    token.starts_with('-') && token.contains('f') && token.contains('d')
+}
+
+fn is_git_force_flag(token: &str) -> bool {
+    token == "-f" || token == "--force" || token == "--force-with-lease"
+}
+
+fn is_protected_branch(token: &str) -> bool {
+    matches!(token, "main" | "master")
+        || token.starts_with("release/")
+        || token.starts_with("prod/")
+}
+
+fn classify_database_destroy(lowercase_target: &str) -> bool {
+    lowercase_target.contains("drop database")
+        || lowercase_target.contains("drop table")
+        || lowercase_target.contains("truncate table")
+        || lowercase_target.contains("db.dropdatabase")
+        || lowercase_target.contains(".deletemany({})")
+        || delete_from_without_where(lowercase_target)
+}
+
+fn delete_from_without_where(text: &str) -> bool {
+    text.split(';').any(|statement| {
+        let Some(delete_index) = statement.find("delete") else {
+            return false;
+        };
+        let after_delete = statement[delete_index + "delete".len()..].trim_start();
+        if !after_delete.starts_with("from") {
+            return false;
+        }
+        let after_from = after_delete["from".len()..].trim();
+        !after_from.is_empty() && !contains_word(after_from, "where")
+    })
+}
+
+fn contains_word(text: &str, word: &str) -> bool {
+    text.split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+        .any(|part| part == word)
+}
+
+fn classify_cloud_delete(tokens: &[String], lowercase_target: &str) -> bool {
+    command_starts_with(tokens, &["railway", "volume", "delete"])
+        || command_starts_with(tokens, &["fly", "apps", "destroy"])
+        || command_starts_with(tokens, &["fly", "volumes", "destroy"])
+        || command_starts_with(tokens, &["vercel", "project", "remove"])
+        || command_starts_with(tokens, &["aws", "ec2", "terminate-instances"])
+        || command_starts_with(tokens, &["aws", "rds", "delete-db-instance"])
+        || command_starts_with(tokens, &["aws", "rds", "delete-db-cluster"])
+        || command_starts_with(tokens, &["gcloud", "compute", "instances", "delete"])
+        || command_starts_with(tokens, &["gcloud", "sql", "instances", "delete"])
+        || command_starts_with(tokens, &["az", "group", "delete"])
+        || lowercase_target.contains("curl")
+            && lowercase_target.contains("delete")
+            && (lowercase_target.contains("railway.app")
+                || lowercase_target.contains("fly.io")
+                || lowercase_target.contains("vercel.app/api/internal"))
+}
+
+fn classify_deploy(tokens: &[String], lowercase_target: &str) -> bool {
+    command_starts_with(tokens, &["fly", "deploy"])
+        || command_starts_with(tokens, &["railway", "up"])
+        || command_starts_with(tokens, &["npm", "run", "deploy"])
+        || tokens.first().is_some_and(|token| token == "deploy")
+        || command_starts_with(tokens, &["vercel"]) && tokens.iter().any(|token| token == "--prod")
+        || lowercase_target.contains(" deploy")
+}
+
+fn command_starts_with(tokens: &[String], expected: &[&str]) -> bool {
+    tokens.len() >= expected.len()
+        && tokens
+            .iter()
+            .zip(expected.iter())
+            .all(|(actual, expected)| actual == expected)
 }
 
 fn classify_mcp(acp: &ActionContextPacket) -> ActionClass {
@@ -276,7 +407,15 @@ fn classify_mcp(acp: &ActionContextPacket) -> ActionClass {
     )
     .to_ascii_lowercase();
 
-    if text.contains("delete")
+    if acp.action.argument_keys.iter().any(|key| {
+        let key = key.to_ascii_lowercase();
+        (key.contains("confirm") || key.contains("force") || key.contains("danger"))
+            && (key.contains("delete")
+                || key.contains("destroy")
+                || key.contains("drop")
+                || key.contains("purge")
+                || key.contains("remove"))
+    }) || text.contains("delete")
         || text.contains("destroy")
         || text.contains("drop")
         || text.contains("purge")
@@ -733,16 +872,16 @@ fn score_task_context(acp: &ActionContextPacket, task: &TaskEnvelope) -> TaskMat
     sources.dedup();
 
     let score = score.min(100) as u8;
-    let reason = task_match_reason(
+    let reason = task_match_reason(TaskMatchReasonInput {
         score,
-        &exact_paths,
-        &near_paths,
-        &source_test_pairs,
-        &matched_terms,
-        &sources,
+        exact_paths: &exact_paths,
+        near_paths: &near_paths,
+        source_test_pairs: &source_test_pairs,
+        matched_terms: &matched_terms,
+        sources: &sources,
         has_stem_overlap,
         has_recent_proximity,
-    );
+    });
 
     TaskMatch {
         score,
@@ -931,44 +1070,49 @@ fn push_source(sources: &mut Vec<TaskSource>, source: TaskSource) {
     }
 }
 
-fn task_match_reason(
+struct TaskMatchReasonInput<'a> {
     score: u8,
-    exact_paths: &[String],
-    near_paths: &[String],
-    source_test_pairs: &[String],
-    matched_terms: &[String],
-    sources: &[TaskSource],
+    exact_paths: &'a [String],
+    near_paths: &'a [String],
+    source_test_pairs: &'a [String],
+    matched_terms: &'a [String],
+    sources: &'a [TaskSource],
     has_stem_overlap: bool,
     has_recent_proximity: bool,
-) -> String {
-    if score == 0 {
+}
+
+fn task_match_reason(input: TaskMatchReasonInput<'_>) -> String {
+    if input.score == 0 {
         return String::from("no usable task evidence");
     }
 
     let mut parts = Vec::new();
-    if !exact_paths.is_empty() {
-        parts.push(format!("exact path {}", exact_paths.join(", ")));
+    if !input.exact_paths.is_empty() {
+        parts.push(format!("exact path {}", input.exact_paths.join(", ")));
     }
-    if !near_paths.is_empty() {
-        parts.push(format!("near path {}", near_paths.join(", ")));
+    if !input.near_paths.is_empty() {
+        parts.push(format!("near path {}", input.near_paths.join(", ")));
     }
-    if !source_test_pairs.is_empty() {
+    if !input.source_test_pairs.is_empty() {
         parts.push(format!(
             "source/test counterpart {}",
-            source_test_pairs.join(", ")
+            input.source_test_pairs.join(", ")
         ));
     }
-    if has_stem_overlap {
+    if input.has_stem_overlap {
         parts.push(String::from("filename stem overlap"));
     }
-    if has_recent_proximity {
+    if input.has_recent_proximity {
         parts.push(String::from("recent file proximity"));
     }
-    if !matched_terms.is_empty() {
-        parts.push(format!("terms {}", matched_terms.join(", ")));
+    if !input.matched_terms.is_empty() {
+        parts.push(format!("terms {}", input.matched_terms.join(", ")));
     }
-    if !sources.is_empty() {
-        parts.push(format!("sources {}", source_names(sources).join(", ")));
+    if !input.sources.is_empty() {
+        parts.push(format!(
+            "sources {}",
+            source_names(input.sources).join(", ")
+        ));
     }
     parts.join("; ")
 }
@@ -1081,10 +1225,85 @@ mod tests {
     }
 
     #[test]
+    fn classifies_git_rewrite_variants() {
+        let cases = [
+            "git push --force origin main",
+            "git push -f origin release/2026-05",
+            "git reset --hard",
+            "git clean -fdx",
+        ];
+
+        for target in cases {
+            let action = classify_action(&acp("shell.exec", target));
+
+            assert_eq!(action.class, ActionClass::GitRewrite, "{target}");
+        }
+    }
+
+    #[test]
     fn classifies_rm_rf_as_shell_delete() {
         let action = classify_action(&acp("shell.exec", "rm -rf ~"));
 
         assert_eq!(action.class, ActionClass::ShellDelete);
+    }
+
+    #[test]
+    fn classifies_sql_delete_without_where_only_as_database_destroy() {
+        let without_where = classify_action(&acp(
+            "shell.exec",
+            "psql \"$DATABASE_URL\" -c 'DELETE FROM users'",
+        ));
+        let with_where = classify_action(&acp(
+            "shell.exec",
+            "mysql -e \"DELETE FROM users WHERE id = 42\"",
+        ));
+
+        assert_eq!(without_where.class, ActionClass::DatabaseDestroy);
+        assert_ne!(with_where.class, ActionClass::DatabaseDestroy);
+    }
+
+    #[test]
+    fn classifies_cloud_delete_and_deploy_commands() {
+        let cloud_delete_cases = [
+            "railway volume delete data",
+            "fly apps destroy prod-app",
+            "aws ec2 terminate-instances --instance-ids i-123",
+            "gcloud compute instances delete prod-vm",
+            "az group delete --name prod",
+        ];
+        for target in cloud_delete_cases {
+            let action = classify_action(&acp("shell.exec", target));
+
+            assert_eq!(action.class, ActionClass::CloudDelete, "{target}");
+        }
+
+        for target in [
+            "vercel --prod",
+            "npm run deploy",
+            "fly deploy",
+            "railway up",
+        ] {
+            let action = classify_action(&acp("shell.exec", target));
+
+            assert_eq!(action.class, ActionClass::Deploy, "{target}");
+        }
+    }
+
+    #[test]
+    fn classifies_mcp_read_write_and_destroy() {
+        let read = classify_action(&acp("mcp.call", "dev:list_projects"));
+        let write = classify_action(&acp("mcp.call", "dev:create_project"));
+        let destroy = classify_action(&acp("mcp.call", "dev:delete_project"));
+        let mut confirm_destroy = acp("mcp.call", "dev:update_project");
+        confirm_destroy.action.argument_keys = vec![String::from("confirm_destroy")];
+
+        assert_eq!(read.class, ActionClass::McpRead);
+        assert_eq!(write.class, ActionClass::McpWrite);
+        assert_eq!(destroy.class, ActionClass::McpDestroy);
+        assert_eq!(
+            classify_action(&confirm_destroy).class,
+            ActionClass::McpDestroy
+        );
     }
 
     fn no_hard_blocks_policy() -> Policy {
@@ -1373,6 +1592,50 @@ actions:
 
         assert_eq!(decision.decision, Decision::Allow);
         assert!(decision.reason.contains("action policy"));
+    }
+
+    #[test]
+    fn default_action_policy_allows_build_commands() {
+        let decision = evaluate_acp(
+            acp("shell.exec", "cargo build --workspace"),
+            &ProjectPolicy::default(),
+        );
+
+        assert_eq!(decision.decision, Decision::Allow);
+        assert!(decision.reason.contains("action: build"));
+    }
+
+    #[test]
+    fn default_action_policy_requires_install_approval() {
+        let decision = evaluate_acp(
+            acp("shell.exec", "npm install left-pad"),
+            &ProjectPolicy::default(),
+        );
+
+        assert_eq!(decision.decision, Decision::RequireApproval);
+        assert!(decision.reason.contains("action: install"));
+    }
+
+    #[test]
+    fn default_action_policy_requires_git_rewrite_approval() {
+        let decision = evaluate_acp(
+            acp("shell.exec", "git reset --hard"),
+            &ProjectPolicy::default(),
+        );
+
+        assert_eq!(decision.decision, Decision::RequireApproval);
+        assert!(decision.reason.contains("action: git_rewrite"));
+    }
+
+    #[test]
+    fn default_action_policy_requires_mcp_write_approval() {
+        let decision = evaluate_acp(
+            acp("mcp.call", "dev:create_project"),
+            &ProjectPolicy::default(),
+        );
+
+        assert_eq!(decision.decision, Decision::RequireApproval);
+        assert!(decision.reason.contains("action: mcp_write"));
     }
 
     #[test]

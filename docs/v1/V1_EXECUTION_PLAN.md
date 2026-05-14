@@ -103,7 +103,7 @@ cargo test --workspace
 | DG-V1-060 | complete 2026-05-14 | Replace shallow task inference with evidence builder | DG-V1-070 |
 | DG-V1-070 | complete 2026-05-14 | Add scored task/action context matching | DG-V1-080 |
 | DG-V1-080 | complete 2026-05-14 | Fix multi-target asset evaluation | DG-V1-090 |
-| DG-V1-090 | pending | Add V1 structural action classifiers | DG-V1-100 |
+| DG-V1-090 | complete 2026-05-14 | Add V1 structural action classifiers | DG-V1-100 |
 | DG-V1-100 | pending | Stabilize policy DSL and policy test behavior | DG-V1-110 |
 | DG-V1-110 | pending | Make approvals typed, validated, and actually enforced | DG-V1-120 |
 | DG-V1-120 | pending | Harden host hook contracts and messages | DG-V1-130 |

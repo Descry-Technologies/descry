@@ -115,11 +115,6 @@ fn target_for_tool(input: &CodexHookInput) -> String {
 fn targets_for_tool(input: &CodexHookInput, target: &str) -> Vec<String> {
     if input.tool_name == "apply_patch" {
         extract_patch_paths(input)
-    } else if matches!(
-        input.tool_name.as_str(),
-        "Read" | "Write" | "Edit" | "read_file" | "write_file"
-    ) {
-        vec![target.to_string()]
     } else {
         vec![target.to_string()]
     }

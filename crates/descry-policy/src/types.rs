@@ -177,6 +177,30 @@ fn default_action_rules() -> BTreeMap<String, ActionRule> {
                 default_action: String::from("allow"),
             },
         ),
+        (
+            String::from("build"),
+            ActionRule {
+                default_action: String::from("allow"),
+            },
+        ),
+        (
+            String::from("install"),
+            ActionRule {
+                default_action: String::from("require_approval"),
+            },
+        ),
+        (
+            String::from("git_rewrite"),
+            ActionRule {
+                default_action: String::from("require_approval"),
+            },
+        ),
+        (
+            String::from("mcp_write"),
+            ActionRule {
+                default_action: String::from("require_approval"),
+            },
+        ),
     ])
 }
 

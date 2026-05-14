@@ -30,6 +30,14 @@ actions:
     default_action: require_approval
   test:
     default_action: allow
+  build:
+    default_action: allow
+  install:
+    default_action: require_approval
+  git_rewrite:
+    default_action: require_approval
+  mcp_write:
+    default_action: require_approval
 "#,
     )
     .expect("project policy loads");
@@ -54,6 +62,14 @@ actions:
     assert_eq!(source.id, "source");
     assert_eq!(source.sensitivity, "normal");
     assert_eq!(source.default_action, "allow_if_context_matches");
+    assert_eq!(
+        policy
+            .actions
+            .get("git_rewrite")
+            .expect("git rewrite action exists")
+            .default_action,
+        "require_approval"
+    );
 }
 
 #[test]
@@ -87,5 +103,29 @@ fn missing_project_policy_uses_safe_builtin_defaults() {
             .expect("source asset matches")
             .id,
         "source"
+    );
+    assert_eq!(
+        policy
+            .actions
+            .get("build")
+            .expect("build action exists")
+            .default_action,
+        "allow"
+    );
+    assert_eq!(
+        policy
+            .actions
+            .get("install")
+            .expect("install action exists")
+            .default_action,
+        "require_approval"
+    );
+    assert_eq!(
+        policy
+            .actions
+            .get("mcp_write")
+            .expect("mcp write action exists")
+            .default_action,
+        "require_approval"
     );
 }
