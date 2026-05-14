@@ -1,94 +1,91 @@
+use std::path::Path;
+
 use descry_core::{ActionContextPacket, Decision};
 use descry_policy::Policy;
 
+#[derive(Debug)]
+struct FixtureCase {
+    path: String,
+    expected_decision: String,
+    expected_rule: Option<String>,
+}
+
 #[test]
-fn safe_defaults_match_tier_one_fixtures() {
+fn safe_defaults_match_manifest_hard_block_fixtures() {
     let policy = Policy::load_yaml(include_str!("../../../policies/safe-defaults.yml"))
         .expect("safe defaults policy loads");
 
-    let cases = [
-        ("../../../fixtures/rm-rf-home.json", Decision::Block),
-        ("../../../fixtures/rm-rf-slash.json", Decision::Block),
-        ("../../../fixtures/rm-rf-home-var.json", Decision::Block),
-        ("../../../fixtures/rm-rf-home-glob.json", Decision::Block),
-        ("../../../fixtures/rm-rf-sudo-home.json", Decision::Block),
-        ("../../../fixtures/force-push-main.json", Decision::Block),
-        ("../../../fixtures/force-push-release.json", Decision::Block),
-        ("../../../fixtures/railway-delete.json", Decision::Block),
-        ("../../../fixtures/fly-destroy.json", Decision::Block),
-        ("../../../fixtures/aws-rds-delete.json", Decision::Block),
-        ("../../../fixtures/gcloud-sql-delete.json", Decision::Block),
-        ("../../../fixtures/db-drop-database.json", Decision::Block),
-        ("../../../fixtures/db-truncate-table.json", Decision::Block),
-        (
-            "../../../fixtures/db-delete-without-where.json",
-            Decision::Block,
-        ),
-        (
-            "../../../fixtures/db-delete-with-where.json",
-            Decision::Allow,
-        ),
-        ("../../../fixtures/normal-edit.json", Decision::Allow),
-        ("../../../fixtures/cargo-test.json", Decision::Allow),
-    ];
-
-    for (fixture, expected) in cases {
-        let acp: ActionContextPacket =
-            serde_yml::from_str(include_str_by_path(fixture)).expect("fixture deserializes");
+    for case in manifest_cases() {
+        if case.expected_decision == "require_approval"
+            || (case.expected_decision == "block" && case.expected_rule.is_none())
+        {
+            continue;
+        }
+        let body = std::fs::read_to_string(repo_path(&case.path)).expect("fixture reads");
+        let acp: ActionContextPacket = serde_yml::from_str(&body).expect("fixture deserializes");
         let decision = policy.evaluate(&acp);
+        let expected = decision_from_manifest(&case.expected_decision);
 
-        assert_eq!(decision.decision, expected, "{fixture}");
-
-        if decision.decision == Decision::Block {
-            assert_eq!(decision.risk_score.0, 100, "{fixture}");
-            assert_eq!(decision.confidence.0, 0.98, "{fixture}");
+        assert_eq!(decision.decision, expected, "{}", case.path);
+        if let Some(rule_id) = case.expected_rule {
+            assert_eq!(decision.decision, Decision::Block, "{}", case.path);
+            assert!(decision.reason.contains(&format!("(rule: {rule_id})")));
+            assert_eq!(decision.risk_score.0, 100, "{}", case.path);
+            assert_eq!(decision.confidence.0, 0.98, "{}", case.path);
         }
     }
 }
 
-fn include_str_by_path(path: &str) -> &'static str {
-    match path {
-        "../../../fixtures/rm-rf-home.json" => include_str!("../../../fixtures/rm-rf-home.json"),
-        "../../../fixtures/rm-rf-slash.json" => include_str!("../../../fixtures/rm-rf-slash.json"),
-        "../../../fixtures/rm-rf-home-var.json" => {
-            include_str!("../../../fixtures/rm-rf-home-var.json")
-        }
-        "../../../fixtures/rm-rf-home-glob.json" => {
-            include_str!("../../../fixtures/rm-rf-home-glob.json")
-        }
-        "../../../fixtures/rm-rf-sudo-home.json" => {
-            include_str!("../../../fixtures/rm-rf-sudo-home.json")
-        }
-        "../../../fixtures/force-push-main.json" => {
-            include_str!("../../../fixtures/force-push-main.json")
-        }
-        "../../../fixtures/force-push-release.json" => {
-            include_str!("../../../fixtures/force-push-release.json")
-        }
-        "../../../fixtures/railway-delete.json" => {
-            include_str!("../../../fixtures/railway-delete.json")
-        }
-        "../../../fixtures/fly-destroy.json" => include_str!("../../../fixtures/fly-destroy.json"),
-        "../../../fixtures/aws-rds-delete.json" => {
-            include_str!("../../../fixtures/aws-rds-delete.json")
-        }
-        "../../../fixtures/gcloud-sql-delete.json" => {
-            include_str!("../../../fixtures/gcloud-sql-delete.json")
-        }
-        "../../../fixtures/db-drop-database.json" => {
-            include_str!("../../../fixtures/db-drop-database.json")
-        }
-        "../../../fixtures/db-truncate-table.json" => {
-            include_str!("../../../fixtures/db-truncate-table.json")
-        }
-        "../../../fixtures/db-delete-without-where.json" => {
-            include_str!("../../../fixtures/db-delete-without-where.json")
-        }
-        "../../../fixtures/db-delete-with-where.json" => {
-            include_str!("../../../fixtures/db-delete-with-where.json")
-        }
-        "../../../fixtures/normal-edit.json" => include_str!("../../../fixtures/normal-edit.json"),
-        "../../../fixtures/cargo-test.json" => include_str!("../../../fixtures/cargo-test.json"),
-        _ => unreachable!("fixture path is defined in the test table"),
+#[test]
+fn manifest_references_existing_fixture_files() {
+    for case in manifest_cases() {
+        assert!(repo_path(&case.path).exists(), "{}", case.path);
     }
+}
+
+fn manifest_cases() -> Vec<FixtureCase> {
+    parse_manifest(include_str!("../../../fixtures/manifest.yml"))
+}
+
+fn parse_manifest(body: &str) -> Vec<FixtureCase> {
+    let mut cases = Vec::new();
+    let mut current = FixtureCase {
+        path: String::new(),
+        expected_decision: String::new(),
+        expected_rule: None,
+    };
+    for line in body.lines() {
+        if let Some(path) = line.strip_prefix("- path: ") {
+            if !current.path.is_empty() {
+                cases.push(current);
+            }
+            current = FixtureCase {
+                path: path.trim().to_string(),
+                expected_decision: String::new(),
+                expected_rule: None,
+            };
+        } else if let Some(value) = line.trim().strip_prefix("expected_decision: ") {
+            current.expected_decision = value.trim().to_string();
+        } else if let Some(value) = line.trim().strip_prefix("expected_rule: ") {
+            current.expected_rule = Some(value.trim().to_string());
+        }
+    }
+    if !current.path.is_empty() {
+        cases.push(current);
+    }
+    cases
+}
+
+fn decision_from_manifest(value: &str) -> Decision {
+    match value {
+        "allow" => Decision::Allow,
+        "block" => Decision::Block,
+        other => panic!("unsupported hard-block manifest decision {other}"),
+    }
+}
+
+fn repo_path(path: impl AsRef<Path>) -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(path)
 }

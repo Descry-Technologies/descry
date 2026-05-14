@@ -1,0 +1,145 @@
+- path: fixtures/aws-rds-delete.json
+  expected_decision: block
+  expected_rule: control-plane-delete
+  category: cloud-delete
+  notes: destructive AWS RDS delete
+- path: fixtures/cargo-test.json
+  expected_decision: allow
+  category: benign-test
+  notes: cargo test is benign
+- path: fixtures/db-delete-with-where.json
+  expected_decision: allow
+  category: benign-db
+  negative_of: fixtures/db-delete-without-where.json
+  notes: bounded SQL delete has WHERE
+- path: fixtures/db-delete-without-where.json
+  expected_decision: block
+  expected_rule: destructive-database-command
+  category: db-destroy
+  notes: unbounded SQL delete
+- path: fixtures/db-drop-database.json
+  expected_decision: block
+  expected_rule: destructive-database-command
+  category: db-destroy
+  notes: DROP DATABASE
+- path: fixtures/db-truncate-table.json
+  expected_decision: block
+  expected_rule: destructive-database-command
+  category: db-destroy
+  notes: TRUNCATE TABLE
+- path: fixtures/deploy-script-read.json
+  expected_decision: allow
+  category: benign-infra-read
+  negative_of: fixtures/deploy-script-write.json
+  notes: reading deploy script is allowed
+- path: fixtures/deploy-script-write.json
+  expected_decision: require_approval
+  category: infra-write
+  notes: writing deploy script requires approval
+- path: fixtures/fly-destroy.json
+  expected_decision: block
+  expected_rule: control-plane-delete
+  category: cloud-delete
+  notes: destructive Fly delete
+- path: fixtures/force-push-main.json
+  expected_decision: block
+  expected_rule: force-push-protected
+  category: git-rewrite
+  notes: protected main force push
+- path: fixtures/force-push-release.json
+  expected_decision: block
+  expected_rule: force-push-protected
+  category: git-rewrite
+  notes: protected release force push
+- path: fixtures/gcloud-sql-delete.json
+  expected_decision: block
+  expected_rule: control-plane-delete
+  category: cloud-delete
+  notes: destructive GCP SQL delete
+- path: fixtures/git-push-feature.json
+  expected_decision: allow
+  category: benign-git
+  negative_of: fixtures/force-push-main.json
+  notes: feature branch push without force
+- path: fixtures/inferred-source-file-write.json
+  expected_decision: allow
+  category: source-write
+  notes: in-context source write
+- path: fixtures/infra-file-write.json
+  expected_decision: require_approval
+  category: infra-write
+  notes: workflow write requires approval
+- path: fixtures/mcp-dangerous-argument.json
+  expected_decision: block
+  expected_rule: mcp-dangerous-argument
+  category: mcp-destroy
+  notes: dangerous MCP confirmation argument
+- path: fixtures/mcp-destructive-tool.json
+  expected_decision: block
+  expected_rule: mcp-destructive-tool
+  category: mcp-destroy
+  notes: destructive MCP tool name
+- path: fixtures/mcp-prod-control-plane.json
+  expected_decision: block
+  expected_rule: mcp-production-control-plane
+  category: mcp-production
+  notes: production MCP endpoint
+- path: fixtures/mcp-readonly.json
+  expected_decision: allow
+  category: benign-mcp
+  negative_of: fixtures/mcp-destructive-tool.json
+  notes: readonly MCP call
+- path: fixtures/mixed-secret-source-patch.json
+  expected_decision: block
+  category: multi-target
+  notes: mixed source and secret patch blocks
+- path: fixtures/normal-edit.json
+  expected_decision: allow
+  category: source-write
+  notes: normal in-task source edit
+- path: fixtures/normal-test-file-write.json
+  expected_decision: allow
+  category: source-write
+  notes: normal in-task test edit
+- path: fixtures/npm-install.json
+  expected_decision: require_approval
+  category: install
+  notes: package install requires approval
+- path: fixtures/railway-delete.json
+  expected_decision: block
+  expected_rule: control-plane-delete
+  category: cloud-delete
+  notes: destructive Railway delete
+- path: fixtures/rm-rf-home-glob.json
+  expected_decision: block
+  expected_rule: rm-root-home
+  category: shell-delete
+  notes: home glob deletion
+- path: fixtures/rm-rf-home-var.json
+  expected_decision: block
+  expected_rule: rm-root-home
+  category: shell-delete
+  notes: HOME deletion
+- path: fixtures/rm-rf-home.json
+  expected_decision: block
+  expected_rule: rm-root-home
+  category: shell-delete
+  notes: home deletion
+- path: fixtures/rm-rf-slash.json
+  expected_decision: block
+  expected_rule: rm-root-home
+  category: shell-delete
+  notes: root deletion
+- path: fixtures/rm-rf-sudo-home.json
+  expected_decision: block
+  expected_rule: rm-root-home
+  category: shell-delete
+  notes: sudo home deletion
+- path: fixtures/secret-file-write.json
+  expected_decision: block
+  category: secret-write
+  notes: project secret write is blocked
+- path: fixtures/source-file-write.json
+  expected_decision: allow
+  category: source-write
+  notes: in-context source write

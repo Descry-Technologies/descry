@@ -26,6 +26,12 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+      - name: Fixture manifest gate
+        run: |
+          test -f fixtures/manifest.yml
+          cargo test -p descry-policy --test safe_defaults
+          cargo test -p descry-cli --test policy_test --test evaluate --no-fail-fast
+
       - name: Installer source smoke
         env:
           CARGO_NET_OFFLINE: true

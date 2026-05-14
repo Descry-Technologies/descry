@@ -3,52 +3,29 @@ use std::path::{Path, PathBuf};
 use descry_cli::{run_with_io, Cli, Commands, ExpectedVerdict, PolicyAction};
 use serde_json::Value;
 
-#[test]
-fn policy_test_matches_tier_one_fixtures() {
-    let cases = [
-        ("fixtures/rm-rf-home.json", ExpectedVerdict::Block),
-        ("fixtures/rm-rf-slash.json", ExpectedVerdict::Block),
-        ("fixtures/rm-rf-home-var.json", ExpectedVerdict::Block),
-        ("fixtures/rm-rf-home-glob.json", ExpectedVerdict::Block),
-        ("fixtures/rm-rf-sudo-home.json", ExpectedVerdict::Block),
-        ("fixtures/force-push-main.json", ExpectedVerdict::Block),
-        ("fixtures/force-push-release.json", ExpectedVerdict::Block),
-        ("fixtures/railway-delete.json", ExpectedVerdict::Block),
-        ("fixtures/fly-destroy.json", ExpectedVerdict::Block),
-        ("fixtures/aws-rds-delete.json", ExpectedVerdict::Block),
-        ("fixtures/gcloud-sql-delete.json", ExpectedVerdict::Block),
-        ("fixtures/db-drop-database.json", ExpectedVerdict::Block),
-        ("fixtures/db-truncate-table.json", ExpectedVerdict::Block),
-        (
-            "fixtures/db-delete-without-where.json",
-            ExpectedVerdict::Block,
-        ),
-        ("fixtures/db-delete-with-where.json", ExpectedVerdict::Allow),
-        (
-            "fixtures/mcp-prod-control-plane.json",
-            ExpectedVerdict::Block,
-        ),
-        ("fixtures/mcp-destructive-tool.json", ExpectedVerdict::Block),
-        (
-            "fixtures/mcp-dangerous-argument.json",
-            ExpectedVerdict::Block,
-        ),
-        ("fixtures/normal-edit.json", ExpectedVerdict::Allow),
-        ("fixtures/cargo-test.json", ExpectedVerdict::Allow),
-        ("fixtures/mcp-readonly.json", ExpectedVerdict::Allow),
-    ];
+#[derive(Debug)]
+struct FixtureCase {
+    path: String,
+    expected_decision: String,
+    expected_rule: Option<String>,
+}
 
-    for (fixture, expect) in cases {
-        let cli = policy_test_cli(fixture, expect);
+#[test]
+fn policy_test_matches_manifest_fixtures() {
+    for case in manifest_cases() {
+        let cli = policy_test_cli(&case.path, expected_verdict(&case.expected_decision));
         let mut input = [].as_slice();
         let mut output = Vec::new();
         let mut error = Vec::new();
 
         run_with_io(cli, &mut input, &mut output, &mut error).expect("policy test succeeds");
 
-        assert!(error.is_empty(), "{fixture}");
+        assert!(error.is_empty(), "{}", case.path);
         let json: Value = serde_json::from_slice(&output).expect("stdout is json");
-        assert_eq!(json["match"], true, "{fixture}");
+        assert_eq!(json["match"], true, "{}", case.path);
+        if let Some(rule_id) = case.expected_rule {
+            assert_eq!(json["rule"], rule_id, "{}", case.path);
+        }
     }
 }
 
@@ -133,4 +110,46 @@ fn repo_path(path: impl AsRef<Path>) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .join(path)
+}
+
+fn manifest_cases() -> Vec<FixtureCase> {
+    parse_manifest(include_str!("../../../fixtures/manifest.yml"))
+}
+
+fn parse_manifest(body: &str) -> Vec<FixtureCase> {
+    let mut cases = Vec::new();
+    let mut current = FixtureCase {
+        path: String::new(),
+        expected_decision: String::new(),
+        expected_rule: None,
+    };
+    for line in body.lines() {
+        if let Some(path) = line.strip_prefix("- path: ") {
+            if !current.path.is_empty() {
+                cases.push(current);
+            }
+            current = FixtureCase {
+                path: path.trim().to_string(),
+                expected_decision: String::new(),
+                expected_rule: None,
+            };
+        } else if let Some(value) = line.trim().strip_prefix("expected_decision: ") {
+            current.expected_decision = value.trim().to_string();
+        } else if let Some(value) = line.trim().strip_prefix("expected_rule: ") {
+            current.expected_rule = Some(value.trim().to_string());
+        }
+    }
+    if !current.path.is_empty() {
+        cases.push(current);
+    }
+    cases
+}
+
+fn expected_verdict(value: &str) -> ExpectedVerdict {
+    match value {
+        "allow" => ExpectedVerdict::Allow,
+        "require_approval" => ExpectedVerdict::RequireApproval,
+        "block" => ExpectedVerdict::Block,
+        other => panic!("unsupported manifest decision {other}"),
+    }
 }

@@ -1,0 +1,36 @@
+{
+  "actor": {
+    "type": "agent",
+    "name": "claude-code",
+    "owner": "maciej",
+    "trust_level": "local_dev_agent"
+  },
+  "action": {
+    "type": "file.read",
+    "verb": "read",
+    "target": "scripts/deploy/prod.sh",
+    "diff_summary": null,
+    "argument_keys": []
+  },
+  "intent": {
+    "active_task": "inspect deploy script",
+    "source": "user_prompt",
+    "linked_issue": null
+  },
+  "asset": {
+    "type": "code_file",
+    "sensitivity": "high",
+    "environment": "local"
+  },
+  "context": {
+    "repo": "descry",
+    "branch": "inspect/deploy",
+    "recent_files": [],
+    "recent_approvals": []
+  },
+  "blast_radius": {
+    "reversible": true,
+    "customer_impact": "none",
+    "financial_impact": "none"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "actor": {
+    "type": "agent",
+    "name": "claude-code",
+    "owner": "maciej",
+    "trust_level": "local_dev_agent"
+  },
+  "action": {
+    "type": "shell.exec",
+    "verb": "run",
+    "target": "git push origin feature/session-expiry",
+    "diff_summary": null
+  },
+  "intent": {
+    "active_task": "fix session expiry",
+    "source": "user_prompt",
+    "linked_issue": null
+  },
+  "asset": {
+    "type": "shell_command",
+    "sensitivity": "low",
+    "environment": "local"
+  },
+  "context": {
+    "repo": "descry",
+    "branch": "feature/session-expiry",
+    "recent_files": [],
+    "recent_approvals": []
+  },
+  "blast_radius": {
+    "reversible": true,
+    "customer_impact": "none",
+    "financial_impact": "none"
+  }
+}
