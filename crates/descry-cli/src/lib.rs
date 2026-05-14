@@ -44,7 +44,7 @@ impl From<io::Error> for CliError {
 }
 
 #[derive(Debug, Parser)]
-#[command(name = "descry")]
+#[command(name = "descry", version)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,

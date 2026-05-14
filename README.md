@@ -26,6 +26,8 @@ Descry Guard gives those actions a deterministic preflight check:
 
 Alpha. The engine is usable for local demos and policy regression tests, but the public install flow and full v0.1 product surface are still in progress.
 
+V1 public claims are tracked in [docs/V1_LAUNCH_CONTRACT.md](docs/V1_LAUNCH_CONTRACT.md) and [docs/V1_CLAIM_MATRIX.md](docs/V1_CLAIM_MATRIX.md).
+
 Current capabilities:
 
 - Local Rust CLI: `descry`
@@ -46,14 +48,9 @@ Alpha limitations:
 - published Homebrew tap
 - daemon remains an experimental local HTTP route skeleton, not the full hook runtime path
 
-## Quickstart From Source
+## Quickstart
 
-Prerequisites:
-
-- Rust stable toolchain
-- Git
-
-Install with the source installer:
+Release install:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/descry-dev/descry/main/scripts/install.sh | sh
@@ -61,15 +58,29 @@ descry init
 descry demo in-task-edit
 ```
 
-Or install from a local checkout:
+Installer settings:
+
+```bash
+DESCRY_VERSION=0.1.0
+DESCRY_INSTALL_MODE=release
+DESCRY_INSTALL_DIR=$HOME/.local/bin
+```
+
+Source checkout install:
 
 ```bash
 git clone https://github.com/descry-dev/descry.git
 cd descry
-cargo install --locked --path crates/descry-cli
+DESCRY_INSTALL_MODE=source DESCRY_SOURCE_DIR=$PWD sh scripts/install.sh
 descry init --dry-run
 descry demo in-task-edit
 descry demo off-task-edit
+```
+
+Or install directly with Cargo from a checkout:
+
+```bash
+cargo install --locked --path crates/descry-cli
 ```
 
 Expected demo shape:

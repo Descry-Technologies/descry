@@ -25,3 +25,36 @@ jobs:
 
       - name: Test
         run: cargo test --workspace
+
+      - name: Installer source smoke
+        env:
+          CARGO_NET_OFFLINE: true
+        run: DESCRY_SOURCE_DIR="$PWD" CARGO_INSTALL_ROOT=/tmp/descry-cargo-root sh scripts/install.sh
+
+      - name: Smoke source-installed binary
+        run: /tmp/descry-cargo-root/bin/descry --help
+
+  package-smoke:
+    name: Package smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Resolve host target
+        run: echo "HOST_TARGET=$(rustc -vV | awk '/host:/ {print $2}')" >> "$GITHUB_ENV"
+
+      - name: Package host target
+        env:
+          DESCRY_DIST_DIR: /tmp/descry-ci-dist
+        run: DESCRY_PACKAGE_TARGET="$HOST_TARGET" sh scripts/package.sh 0.1.0
+
+      - name: Smoke archive
+        run: |
+          tar -tzf "/tmp/descry-ci-dist/descry-0.1.0-$HOST_TARGET.tar.gz" | grep '/descry$'
+          mkdir -p /tmp/descry-ci-extract
+          tar -xzf "/tmp/descry-ci-dist/descry-0.1.0-$HOST_TARGET.tar.gz" -C /tmp/descry-ci-extract
+          "/tmp/descry-ci-extract/descry-0.1.0-$HOST_TARGET/descry" --help

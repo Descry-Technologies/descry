@@ -34,6 +34,21 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Add Rust target
+        run: rustup target add "${{ matrix.target_name }}"
+
+      - name: Check package version
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          if [ -z "$VERSION" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          PACKAGE_VERSION="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json, sys; data = json.load(sys.stdin); print(next(package["version"] for package in data["packages"] if package["name"] == "descry-cli"))')"
+          if [ "$PACKAGE_VERSION" != "$VERSION" ]; then
+            echo "package version $PACKAGE_VERSION does not match release version $VERSION" >&2
+            exit 1
+          fi
+
       - name: Package
         env:
           DESCRY_PACKAGE_TARGET: ${{ matrix.target_name }}
@@ -44,6 +59,16 @@ jobs:
           fi
           sh scripts/package.sh "$VERSION"
 
+      - name: Smoke packaged binary
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          if [ -z "$VERSION" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          mkdir -p /tmp/descry-release-smoke
+          tar -xzf "dist/descry-$VERSION-${{ matrix.target_name }}.tar.gz" -C /tmp/descry-release-smoke
+          "/tmp/descry-release-smoke/descry-$VERSION-${{ matrix.target_name }}/descry" --version
+
       - name: Upload package artifact
         uses: actions/upload-artifact@v4
         with:
@@ -51,6 +76,7 @@ jobs:
           path: |
             dist/*.tar.gz
             dist/*.sha256
+            dist/SHA256SUMS
 
   release:
     name: Publish GitHub Release

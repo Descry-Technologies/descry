@@ -231,7 +231,7 @@ dependencies = [
 
 [[package]]
 name = "descry-adapters"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "descry-core",
  "serde",
@@ -240,7 +240,7 @@ dependencies = [
 
 [[package]]
 name = "descry-audit"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "descry-core",
  "serde",
@@ -251,7 +251,7 @@ dependencies = [
 
 [[package]]
 name = "descry-cli"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "clap",
  "descry-adapters",
@@ -271,7 +271,7 @@ dependencies = [
 
 [[package]]
 name = "descry-context"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -280,7 +280,7 @@ dependencies = [
 
 [[package]]
 name = "descry-core"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -290,7 +290,7 @@ dependencies = [
 
 [[package]]
 name = "descry-daemon"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "axum",
  "descry-core",
@@ -303,7 +303,7 @@ dependencies = [
 
 [[package]]
 name = "descry-engine"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "descry-core",
  "descry-memory",
@@ -312,7 +312,7 @@ dependencies = [
 
 [[package]]
 name = "descry-memory"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -322,7 +322,7 @@ dependencies = [
 
 [[package]]
 name = "descry-policy"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "descry-core",
  "regex",

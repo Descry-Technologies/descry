@@ -92,26 +92,26 @@ cargo test --workspace
 
 ## Ticket Map
 
-| Ticket | Title | Blocks |
-|---|---|---|
-| DG-V1-000 | Freeze launch contract and claim matrix | all |
-| DG-V1-010 | Make release packages target-correct | DG-V1-020 |
-| DG-V1-020 | Make installer consume release artifacts | DG-V1-030 |
-| DG-V1-030 | Make init/doctor/hook install clean-machine reliable | DG-V1-040 |
-| DG-V1-040 | Introduce shared runtime context spine | DG-V1-050, DG-V1-060, DG-V1-130 |
-| DG-V1-050 | Enrich adapter outputs with safe harness metadata | DG-V1-060 |
-| DG-V1-060 | Replace shallow task inference with evidence builder | DG-V1-070 |
-| DG-V1-070 | Add scored task/action context matching | DG-V1-080 |
-| DG-V1-080 | Fix multi-target asset evaluation | DG-V1-090 |
-| DG-V1-090 | Add V1 structural action classifiers | DG-V1-100 |
-| DG-V1-100 | Stabilize policy DSL and policy test behavior | DG-V1-110 |
-| DG-V1-110 | Make approvals typed, validated, and actually enforced | DG-V1-120 |
-| DG-V1-120 | Harden host hook contracts and messages | DG-V1-130 |
-| DG-V1-130 | Complete audit/memory semantics | DG-V1-140 |
-| DG-V1-140 | Make demos reproducible launch tests | DG-V1-150 |
-| DG-V1-150 | Add fixture manifest and false-positive gate | DG-V1-160 |
-| DG-V1-160 | Decide daemon V1 surface and enforce parity or hide it | DG-V1-170 |
-| DG-V1-170 | Align public docs, README, roadmap, and website | release |
+| Ticket | Status | Title | Blocks |
+|---|---|---|---|
+| DG-V1-000 | complete 2026-05-14 | Freeze launch contract and claim matrix | all |
+| DG-V1-010 | complete 2026-05-14 | Make release packages target-correct | DG-V1-020 |
+| DG-V1-020 | complete 2026-05-14 | Make installer consume release artifacts | DG-V1-030 |
+| DG-V1-030 | pending | Make init/doctor/hook install clean-machine reliable | DG-V1-040 |
+| DG-V1-040 | pending | Introduce shared runtime context spine | DG-V1-050, DG-V1-060, DG-V1-130 |
+| DG-V1-050 | pending | Enrich adapter outputs with safe harness metadata | DG-V1-060 |
+| DG-V1-060 | pending | Replace shallow task inference with evidence builder | DG-V1-070 |
+| DG-V1-070 | pending | Add scored task/action context matching | DG-V1-080 |
+| DG-V1-080 | pending | Fix multi-target asset evaluation | DG-V1-090 |
+| DG-V1-090 | pending | Add V1 structural action classifiers | DG-V1-100 |
+| DG-V1-100 | pending | Stabilize policy DSL and policy test behavior | DG-V1-110 |
+| DG-V1-110 | pending | Make approvals typed, validated, and actually enforced | DG-V1-120 |
+| DG-V1-120 | pending | Harden host hook contracts and messages | DG-V1-130 |
+| DG-V1-130 | pending | Complete audit/memory semantics | DG-V1-140 |
+| DG-V1-140 | pending | Make demos reproducible launch tests | DG-V1-150 |
+| DG-V1-150 | pending | Add fixture manifest and false-positive gate | DG-V1-160 |
+| DG-V1-160 | pending | Decide daemon V1 surface and enforce parity or hide it | DG-V1-170 |
+| DG-V1-170 | pending | Align public docs, README, roadmap, and website | release |
 
 ---
 
@@ -219,6 +219,7 @@ named in their archive.
 
 ## Allowed Paths
 
+- `Cargo.lock`
 - `Cargo.toml`
 - `crates/descry-cli/src/lib.rs`
 - `crates/descry-cli/tests/**`

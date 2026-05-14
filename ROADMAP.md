@@ -29,8 +29,11 @@ Descry Guard is the open-source local engine for AI coding-agent safety. This ro
 
 ## v0.1 Remaining
 
-- Publish Homebrew tap repository
-- Clean-machine README install test outside the development checkout
+V1 launch scope is governed by [docs/V1_LAUNCH_CONTRACT.md](docs/V1_LAUNCH_CONTRACT.md), and public claims are tracked in [docs/V1_CLAIM_MATRIX.md](docs/V1_CLAIM_MATRIX.md).
+
+- Publish Homebrew tap repository.
+- Clean-machine README install test outside the development checkout.
+- Complete the DG-V1 ticket sequence in `docs/v1/V1_EXECUTION_PLAN.md`, especially install artifact consumption, hook/doctor reliability, runtime context, task evidence, action classification, approval enforcement, audit semantics, demo gates, false-positive fixtures, daemon stance, and final docs alignment.
 
 ## v0.2
 
