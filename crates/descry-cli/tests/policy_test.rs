@@ -3,6 +3,40 @@ use std::path::{Path, PathBuf};
 use descry_cli::{run_with_io, Cli, Commands, ExpectedVerdict, PolicyAction};
 use serde_json::Value;
 
+#[test]
+fn policy_precision_gate_passes_on_manifest_corpus() {
+    let cli = Cli {
+        command: Commands::Policy {
+            action: PolicyAction::Precision {
+                manifest: repo_path("fixtures/manifest.yml"),
+                policy: repo_path("policies/safe-defaults.yml"),
+                project: repo_path(".descry/project.yml"),
+                approvals: repo_path(".descry/memory/approvals.jsonl"),
+                behavior: repo_path(".descry/memory/behavior.json"),
+                min_precision: 0.95,
+            },
+        },
+    };
+    let mut input = [].as_slice();
+    let mut output = Vec::new();
+    let mut error = Vec::new();
+
+    run_with_io(cli, &mut input, &mut output, &mut error)
+        .expect("precision gate passes on fixture corpus");
+
+    assert!(error.is_empty());
+    let json: Value = serde_json::from_slice(&output).expect("stdout is json");
+    assert_eq!(json["passes"], true, "precision gate must pass: {json}");
+    assert!(
+        json["precision"].as_f64().unwrap_or(0.0) >= 0.95,
+        "precision must be >= 0.95: {json}"
+    );
+    assert!(
+        json["false_positive"].as_u64().unwrap_or(1) == 0,
+        "no false positives allowed on known corpus: {json}"
+    );
+}
+
 #[derive(Debug)]
 struct FixtureCase {
     path: String,

@@ -2600,4 +2600,57 @@ actions:
 
         assert_eq!(decision.decision, Decision::AllowWithLog);
     }
+
+    #[test]
+    fn evaluate_latency_is_under_50ms_p95() {
+        let project_config = ProjectPolicy::default();
+        let approvals_path = temp_path("latency-approvals.jsonl");
+
+        // Three representative actions: source edit (allow), infra edit (require_approval), rm-rf (block)
+        let actions: Vec<(&str, ActionContextPacket)> = vec![
+            (
+                "source_edit_allow",
+                active_file_write("src/auth/session.rs", "fix src/auth/session.rs"),
+            ),
+            (
+                "infra_edit_require_approval",
+                active_file_write(".github/workflows/deploy.yml", "fix deployment workflow"),
+            ),
+            ("rm_rf_block", acp("shell.exec", "rm -rf ~")),
+        ];
+
+        let mut durations: Vec<std::time::Duration> = Vec::with_capacity(300);
+
+        for _ in 0..100 {
+            for (_, action) in &actions {
+                let start = std::time::Instant::now();
+                let _ = evaluate_acp_with_approvals(
+                    action.clone(),
+                    &project_config,
+                    no_hard_blocks_policy(),
+                    &approvals_path,
+                );
+                durations.push(start.elapsed());
+            }
+        }
+
+        durations.sort_unstable();
+
+        let p50_idx = (durations.len() as f64 * 0.50) as usize;
+        let p95_idx = (durations.len() as f64 * 0.95) as usize;
+        let p50 = durations[p50_idx.min(durations.len() - 1)];
+        let p95 = durations[p95_idx.min(durations.len() - 1)];
+
+        let limit_p95 = std::time::Duration::from_millis(50);
+        let limit_p50 = std::time::Duration::from_millis(10);
+
+        assert!(
+            p95 < limit_p95,
+            "p95 latency {p95:?} exceeds 50ms threshold (p50={p50:?})"
+        );
+        assert!(
+            p50 < limit_p50,
+            "p50 latency {p50:?} exceeds 10ms threshold (p95={p95:?})"
+        );
+    }
 }

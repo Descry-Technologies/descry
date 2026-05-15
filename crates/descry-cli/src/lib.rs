@@ -96,6 +96,10 @@ pub enum Commands {
         #[command(subcommand)]
         action: PolicyAction,
     },
+    Baseline {
+        #[command(subcommand)]
+        action: BaselineAction,
+    },
     Scope {
         #[command(subcommand)]
         action: ScopeAction,
@@ -214,6 +218,34 @@ pub enum PolicyAction {
         behavior: PathBuf,
         #[arg(long)]
         hard_block_only: bool,
+    },
+    /// Run all manifest fixtures and report precision/recall (P4 gate).
+    /// Exits non-zero if block-precision < --min-precision (default 0.95).
+    Precision {
+        #[arg(long, default_value = "fixtures/manifest.yml")]
+        manifest: PathBuf,
+        #[arg(long, default_value = "policies/safe-defaults.yml")]
+        policy: PathBuf,
+        #[arg(long, default_value = ".descry/project.yml")]
+        project: PathBuf,
+        #[arg(long, default_value = ".descry/memory/approvals.jsonl")]
+        approvals: PathBuf,
+        #[arg(long, default_value = ".descry/memory/behavior.json")]
+        behavior: PathBuf,
+        #[arg(long, default_value_t = 0.95)]
+        min_precision: f64,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum BaselineAction {
+    /// Explain why the engine makes the decisions it does for a given agent + action + target.
+    Explain {
+        agent: String,
+        action: String,
+        target: String,
+        #[arg(long, default_value = ".descry/memory/behavior.json")]
+        behavior: PathBuf,
     },
 }
 
@@ -600,5 +632,6 @@ pub fn run_with_io(
         ),
         Commands::Hook { action } => commands::hook::run(action, input, output, error),
         Commands::Demo { action } => commands::demo::run(action, output),
+        Commands::Baseline { action } => commands::baseline::run(action, output),
     }
 }
