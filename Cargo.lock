@@ -299,8 +299,11 @@ dependencies = [
  "axum",
  "descry-core",
  "descry-engine",
+ "descry-memory",
  "descry-policy",
+ "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tower",
 ]
@@ -334,6 +337,14 @@ dependencies = [
  "regex",
  "serde",
  "serde_yml",
+]
+
+[[package]]
+name = "descry-verify"
+version = "0.1.0"
+dependencies = [
+ "descry-audit",
+ "serde_json",
 ]
 
 [[package]]

@@ -7,12 +7,15 @@ This document is a binding promise from Descry Technologies about how the open-s
 This promise covers:
 
 - The `descry` Rust workspace in this repository — every crate published from this repo, every binary built from it, and every policy pack shipped alongside it under `policies/`.
+  - This explicitly includes V2 additions: `crates/descry-verify` (standalone chain verifier), the Merkle checkpoint and export-bundle layer in `crates/descry-audit`, the drift/hijack inspection stage and behavior baseline store in `crates/descry-engine` and `crates/descry-memory`, the adapter origin-provenance layer in `crates/descry-adapters`, and the precision-gate and baseline-explain commands in `crates/descry-cli`.
 - The example demos under `demos/`.
-- The specs and operator docs that describe the on-disk formats and protocols (Action Context Packet schema, policy DSL, audit-log hash chain, MCP gateway behavior).
+- The specs and operator docs that describe the on-disk formats and protocols (Action Context Packet schema, policy DSL, audit-log hash chain, Merkle checkpoint format, export bundle schema, MCP gateway behavior).
+
+**Positioning note.** The local firewall — the inline deterministic block/allow engine — is the core product. Provability primitives (Merkle checkpoints, `descry-verify`, export bundles) and team policy sync are deliberate *extensions* built on top of the firewall. Both extension families are covered by this promise when they ship in this repository. Neither is required to run the firewall locally.
 
 It does **not** cover:
 
-- The Descry cloud platform (web UI, encrypted audit sync service, billing, identity). That lives in a separate repository under a separate, proprietary license. The cloud platform is optional; Descry is fully usable without it.
+- The Descry cloud platform (web UI, encrypted audit sync service, team policy sync, billing, SSO, SIEM export, managed audit retention, identity). That lives in a separate repository under a separate, proprietary license. The cloud platform is optional; Descry is fully usable without it.
 - Third-party dependencies brought in via `Cargo.toml` — those retain their upstream licenses.
 
 ## 2. The license

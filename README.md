@@ -24,9 +24,11 @@ Descry Guard gives those actions a deterministic preflight check:
 
 ## Status
 
-Alpha. The local V1 engine is implemented for source installs, demos, policy regression tests, supported agent hooks, scoped approvals, and local audit verification. Final release publication work remains before a tagged public v0.1.
+Alpha. The local engine (V1 + V2) is implemented for source installs, demos, policy regression tests, supported agent hooks, scoped approvals, behavior baselines, precision gates, drift/hijack detection, Merkle-checkpointed audit, and standalone chain verification.
 
-V1 public claims are tracked in [docs/V1_LAUNCH_CONTRACT.md](docs/V1_LAUNCH_CONTRACT.md) and [docs/V1_CLAIM_MATRIX.md](docs/V1_CLAIM_MATRIX.md).
+V1 claims are tracked in [docs/V1_LAUNCH_CONTRACT.md](docs/V1_LAUNCH_CONTRACT.md) and [docs/V1_CLAIM_MATRIX.md](docs/V1_CLAIM_MATRIX.md). V2 claims are tracked in [docs/V2_CLAIM_MATRIX.md](docs/V2_CLAIM_MATRIX.md). Final release publication work remains before a tagged public v0.1.
+
+**The local firewall is the product.** Provability (Merkle audit, `descry-verify`) and team policy sync are deliberate extensions — useful additions on top of the core block/allow engine, not prerequisites.
 
 Current capabilities:
 
@@ -37,17 +39,25 @@ Current capabilities:
 - Cursor MCP policy matching by target, tool summary, and safe argument keys
 - Typed scoped TTL approvals for paths, actions, and MCP targets
 - Project asset and action defaults from `.descry/project.yml`
-- Hash-chained local audit log verification
+- Adapter origin provenance: `User | AgentReasoning | ToolOutput | RepoContent | WebContent`
+- Drift/hijack detection stage: flags external-provenance irreversible actions with `HighConfidence | Suspicious | None`
+- Behavior baseline store: `unseen | rare | occasional | familiar` familiarity tiers
+- `descry baseline explain` for per-triple (agent, action, target) familiarity explanation
+- Precision gate: `descry policy precision` enforces TP/(TP+FP) ≥ target threshold on a fixture manifest
+- Merkle-checkpointed audit log: SHA-256 binary tree over 100-record batches, exportable as self-contained JSON bundle
+- `descry-verify` standalone binary: verify chain integrity or export proof bundle without the CLI runtime
+- Hash-chained local audit log: `descry logs verify`, `tail`, `search`
 - Hook installation, doctor checks, and `doctor --fix` repair
 - Minimal project initialization with `.descry/project.yml`, state, memory, and index generation
 - Staged and pre-push secret scanning
+- Daemon `GET /v1/status` and `POST /v1/approve` endpoints
 - Reproducible launch demos: `in-task-edit`, `off-task-edit`, `secret-access`, `rm-rf`, `mcp-poison`, `prod-delete`, `pocketos`
 
 Alpha limitations:
 
-- Supported agent integrations are Claude Code, Codex, and Cursor; other agents are not V1 hook targets.
+- Supported agent integrations are Claude Code, Codex, and Cursor; other agents are not V1/V2 hook targets.
 - No published Homebrew tap yet; release artifacts and formula generation exist in this repository.
-- The daemon remains an experimental local HTTP route skeleton, not the full hook runtime path.
+- The daemon provides approval and status endpoints; full policy-sync and cache relay remain future work.
 - The open-source repository does not include the future team cloud platform, policy sync, SSO, SIEM export, or managed audit retention.
 - Descry is a user-space preflight and audit tool, not a guarantee against malicious same-user processes.
 
@@ -178,9 +188,18 @@ descry logs verify
 descry logs tail
 descry logs search 'asset:production'
 descry policy test fixtures/railway-delete.json --expect block
+descry policy precision --manifest fixtures/manifest.yml --min-precision 0.95
+descry baseline explain --agent claude --action write_file --target src/main.rs
 descry doctor
 descry doctor --fix
 descry doctor --agent git --fix
+```
+
+Standalone verifier (does not require the full CLI runtime):
+
+```bash
+descry-verify --chain .descry/audit.log
+descry-verify --chain .descry/audit.log --export-bundle
 ```
 
 Hook targets:
@@ -221,9 +240,10 @@ crates/descry-policy    policy loader and matchers
 crates/descry-adapters  Claude, Codex, Cursor normalization
 crates/descry-cli       CLI, hooks, approvals, demos
 crates/descry-context   project index and bounded session history
-crates/descry-audit     tamper-evident JSONL audit chain
+crates/descry-audit     tamper-evident JSONL audit chain + Merkle checkpoints
+crates/descry-verify    standalone chain verifier and proof bundle exporter
 crates/descry-memory    approvals, asset policy, behavior counters
-crates/descry-daemon    local HTTP route skeleton
+crates/descry-daemon    local HTTP daemon (status + approval endpoints)
 policies/               published policy packs
 fixtures/               policy regression fixtures
 ```

@@ -15,7 +15,12 @@ path = "src/lib.rs"
 axum = { workspace = true }
 descry-core = { path = "../descry-core" }
 descry-engine = { path = "../descry-engine" }
+descry-memory = { path = "../descry-memory" }
 descry-policy = { path = "../descry-policy" }
+serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 tower = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

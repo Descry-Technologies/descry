@@ -1,14 +1,17 @@
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::Router;
 use tokio::net::TcpListener;
 
 pub mod routes;
 
 pub fn router() -> Router {
-    Router::new().route("/v1/pretooluse", post(routes::pretooluse))
+    Router::new()
+        .route("/v1/pretooluse", post(routes::pretooluse))
+        .route("/v1/status", get(routes::status))
+        .route("/v1/approve", post(routes::approve))
 }
 
 pub async fn serve(addr: SocketAddr) -> io::Result<()> {

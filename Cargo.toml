@@ -9,6 +9,7 @@ members = [
     "crates/descry-daemon",
     "crates/descry-adapters",
     "crates/descry-cli",
+    "crates/descry-verify",
 ]
 resolver = "2"
 
