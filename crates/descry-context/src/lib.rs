@@ -355,7 +355,39 @@ fn hosted_control_plane_config(path: &str) -> Option<(&'static str, &'static str
         "railway.toml" => Some(("railway", "railway.toml")),
         "fly.toml" => Some(("fly", "fly.toml")),
         "vercel.json" | ".vercel/project.json" => Some(("vercel", "vercel.json")),
+        "render.yaml" | "render.yml" => Some(("render", "render.yaml")),
+        "netlify.toml" | "netlify.json" | "_redirects" => Some(("netlify", "netlify.toml")),
+        "heroku.yml" | "Procfile" => Some(("heroku", "heroku.yml")),
+        "supabase/config.toml" => Some(("supabase", "supabase/config.toml")),
         _ => None,
+    }
+}
+
+/// Returns a provider name if `url_host` looks like a known production control-plane API.
+pub fn production_api_provider(url_host: &str) -> Option<&'static str> {
+    let host = url_host.trim().to_ascii_lowercase();
+    if host.ends_with("railway.app") || host == "api.railway.com" {
+        Some("railway")
+    } else if host.ends_with("fly.io") {
+        Some("fly")
+    } else if host.ends_with("vercel.com") || host.ends_with("vercel.app") {
+        Some("vercel")
+    } else if host.ends_with("render.com") {
+        Some("render")
+    } else if host.ends_with("netlify.com") || host.ends_with("netlify.app") {
+        Some("netlify")
+    } else if host.ends_with("heroku.com") || host.ends_with("herokuapi.com") {
+        Some("heroku")
+    } else if host.ends_with("supabase.com") || host.ends_with("supabase.co") {
+        Some("supabase")
+    } else if host.ends_with("neon.tech") {
+        Some("neon")
+    } else if host.ends_with("planetscale.com") {
+        Some("planetscale")
+    } else if host.ends_with("turso.tech") || host.ends_with("turso.io") {
+        Some("turso")
+    } else {
+        None
     }
 }
 

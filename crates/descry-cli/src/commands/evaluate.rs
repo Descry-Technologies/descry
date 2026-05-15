@@ -50,6 +50,7 @@ pub fn run(
                         project_config: &project_config,
                         approvals_path: &config.approvals,
                         behavior_path: &config.behavior,
+                        project_index: None,
                     },
                 )
             } else {

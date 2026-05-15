@@ -41,6 +41,7 @@ pub fn run(action: PolicyAction, output: &mut dyn Write) -> Result<()> {
                         project_config: &project_config,
                         approvals_path: &approvals,
                         behavior_path: &behavior,
+                        project_index: None,
                     },
                 )
             };

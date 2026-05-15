@@ -307,6 +307,7 @@ dependencies = [
 name = "descry-engine"
 version = "0.1.0"
 dependencies = [
+ "descry-context",
  "descry-core",
  "descry-memory",
  "descry-policy",

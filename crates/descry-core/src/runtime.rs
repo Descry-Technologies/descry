@@ -5,7 +5,90 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ActionContextPacket, DecisionOutput};
+use crate::{ActionContextPacket, DecisionOutput, InstructionProvenance};
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DriftSignal {
+    None,
+    Suspicious,
+    HighConfidence,
+}
+
+impl DriftSignal {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Suspicious => "suspicious",
+            Self::HighConfidence => "high_confidence",
+        }
+    }
+}
+
+/// Classify the drift signal for a decision input.
+///
+/// Pure function — no I/O, no network, no LLM.
+pub fn classify_drift_signal(
+    action_class: &ActionClass,
+    blast_radius_reversible: bool,
+    instruction_provenance: Option<InstructionProvenance>,
+    asset_sensitivity: Option<&str>,
+    task_confidence: f32,
+) -> DriftSignal {
+    let provenance = instruction_provenance.unwrap_or(InstructionProvenance::AgentReasoning);
+
+    let external_provenance = matches!(
+        provenance,
+        InstructionProvenance::ToolOutput
+            | InstructionProvenance::RepoContent
+            | InstructionProvenance::WebContent
+    );
+
+    if !external_provenance {
+        return DriftSignal::None;
+    }
+
+    let destructive = matches!(
+        action_class,
+        ActionClass::ShellDelete
+            | ActionClass::CloudDelete
+            | ActionClass::DatabaseDestroy
+            | ActionClass::McpDestroy
+            | ActionClass::GitRewrite
+    );
+
+    let production_sensitive = asset_sensitivity
+        .map(|s| matches!(s, "critical" | "high"))
+        .unwrap_or(false);
+
+    if destructive && (!blast_radius_reversible || production_sensitive) {
+        return DriftSignal::HighConfidence;
+    }
+
+    // Irreversible action with unrecognized class from external provenance — the classifier
+    // couldn't name it, but the blast-radius flag makes the intent explicit.
+    if !blast_radius_reversible && matches!(action_class, ActionClass::Unknown) {
+        return DriftSignal::HighConfidence;
+    }
+
+    if task_confidence < 0.5 && destructive {
+        return DriftSignal::Suspicious;
+    }
+
+    if external_provenance
+        && matches!(
+            action_class,
+            ActionClass::ShellDelete
+                | ActionClass::CloudDelete
+                | ActionClass::DatabaseDestroy
+                | ActionClass::McpDestroy
+        )
+    {
+        return DriftSignal::Suspicious;
+    }
+
+    DriftSignal::None
+}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]

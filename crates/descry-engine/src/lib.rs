@@ -3,10 +3,12 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use descry_core::{
-    ActionClass, ActionContextPacket, AssetMatch, ClassifiedAction, Confidence, Decision,
-    DecisionInput, DecisionOutput, RiskScore, RuntimeContextConfig, ScopeContract, ScopePermitKind,
-    TaskEnvelope, TaskEnvelopeBuilder, TaskSource,
+    classify_drift_signal, ActionClass, ActionContextPacket, AssetMatch, ClassifiedAction,
+    Confidence, Decision, DecisionInput, DecisionOutput, DriftSignal, RiskScore,
+    RuntimeContextConfig, ScopeContract, ScopePermitKind, TaskEnvelope, TaskEnvelopeBuilder,
+    TaskSource,
 };
+use descry_context::ProjectIndex;
 use descry_policy::{Policy, ProjectPolicy};
 
 pub struct EvaluationRuntime<'a> {
@@ -14,6 +16,7 @@ pub struct EvaluationRuntime<'a> {
     pub project_config: &'a ProjectPolicy,
     pub approvals_path: &'a Path,
     pub behavior_path: &'a Path,
+    pub project_index: Option<&'a ProjectIndex>,
 }
 
 #[derive(Clone, Debug)]
@@ -31,6 +34,7 @@ pub fn evaluate_action(
         .map_err(|error| format!("failed to enrich runtime context: {error}"))?;
     let policy = load_policy(&config.policy_path)?;
     let project_config = load_project_policy(&config.project_policy_path)?;
+    let project_index = descry_context::read_project_index(&config.project_index_path).ok();
     let decision_input = match config.legacy_asset_policy_path.as_deref() {
         Some(asset_policy_path) => {
             build_decision_input_with_legacy_asset_policy(acp.clone(), asset_policy_path)
@@ -42,6 +46,7 @@ pub fn evaluate_action(
         project_config: &project_config,
         approvals_path: &config.approvals_path,
         behavior_path: &config.behavior_path,
+        project_index: project_index.as_ref(),
     };
     let decision = evaluate_with_legacy_asset_policy(
         decision_input.clone(),
@@ -153,7 +158,35 @@ fn match_runtime_asset(
     legacy_asset_policy_path
         .and_then(|asset_policy_path| match_legacy_asset(asset_policy_path, target))
         .or_else(|| runtime.project_config.match_asset(target))
+        .or_else(|| match_project_index_asset(target, runtime.project_index))
         .or_else(|| semantic_asset_graph_match(target))
+}
+
+fn match_project_index_asset(
+    target: &str,
+    project_index: Option<&ProjectIndex>,
+) -> Option<AssetMatch> {
+    let index = project_index?;
+    let lowercase_target = target.to_ascii_lowercase();
+    for node in &index.asset_graph {
+        let matched = node
+            .patterns
+            .iter()
+            .any(|pattern| {
+                let pat = pattern.to_ascii_lowercase();
+                lowercase_target == pat
+                    || lowercase_target.ends_with(&format!("/{pat}"))
+                    || lowercase_target.ends_with(&format!("\\{pat}"))
+            });
+        if matched {
+            return Some(AssetMatch {
+                id: node.id.clone(),
+                sensitivity: node.sensitivity.clone(),
+                default_action: node.default_action.clone(),
+            });
+        }
+    }
+    None
 }
 
 fn expand_target_stage(acp: &ActionContextPacket) -> Vec<String> {
@@ -169,8 +202,73 @@ fn evaluate_target_stage(
     let candidate_input =
         prepare_target_input_stage(input, target, runtime, legacy_asset_policy_path);
     let tier_one_decision = tier_one_policy_stage(&candidate_input, runtime);
+    let is_tier_one_block = tier_one_decision.decision == Decision::Block;
+    let verdict = verdict_layer_stage(tier_one_decision, &candidate_input, runtime);
 
-    verdict_layer_stage(tier_one_decision, &candidate_input, runtime)
+    drift_inspection_stage(verdict, &candidate_input, is_tier_one_block)
+}
+
+fn drift_inspection_stage(
+    upstream: DecisionOutput,
+    input: &DecisionInput,
+    is_tier_one_block: bool,
+) -> DecisionOutput {
+    // Skip drift when Tier-1 was authoritative — including when an approval override
+    // downgraded that block to allow_with_log. The human approval is the final word.
+    if is_tier_one_block {
+        return upstream;
+    }
+
+    let asset_sensitivity = input.asset.as_ref().map(|a| a.sensitivity.as_str());
+    let signal = classify_drift_signal(
+        &input.action.class,
+        input.action.reversible,
+        input.instruction_provenance,
+        asset_sensitivity,
+        input.task.confidence,
+    );
+
+    match signal {
+        DriftSignal::None => upstream,
+        DriftSignal::Suspicious => {
+            let provenance_label = input
+                .instruction_provenance
+                .map(|p| p.label())
+                .unwrap_or("unknown");
+            DecisionOutput {
+                decision: Decision::RequireApproval,
+                risk_score: RiskScore::try_from(78).expect("78 is valid"),
+                confidence: Confidence::try_from(0.75).expect("0.75 is valid"),
+                reason: format!(
+                    "drift: suspicious action {:?} with instruction source: {} (task: {})",
+                    input.action.class,
+                    provenance_label,
+                    input.task.summary.chars().take(120).collect::<String>(),
+                ),
+                conditions: vec![String::from(
+                    "Confirm this action is intentional given the current task",
+                )],
+            }
+        }
+        DriftSignal::HighConfidence => {
+            let provenance_label = input
+                .instruction_provenance
+                .map(|p| p.label())
+                .unwrap_or("unknown");
+            DecisionOutput {
+                decision: Decision::Block,
+                risk_score: RiskScore::try_from(95).expect("95 is valid"),
+                confidence: Confidence::try_from(0.9).expect("0.9 is valid"),
+                reason: format!(
+                    "drift: blocked {:?} — destructive action with instruction source: {} does not fit task: {}",
+                    input.action.class,
+                    provenance_label,
+                    input.task.summary.chars().take(120).collect::<String>(),
+                ),
+                conditions: Vec::new(),
+            }
+        }
+    }
 }
 
 fn prepare_target_input_stage(
@@ -1438,6 +1536,7 @@ fn looks_like_production_mcp_target(target: &str) -> bool {
 fn hosted_control_plane_provider(target: &str) -> Option<&'static str> {
     if target.ends_with("railway.toml")
         || target.contains("api.railway.app")
+        || target.contains("api.railway.com")
         || target.contains("railway volume")
         || target.contains("railway up")
     {
@@ -1450,19 +1549,67 @@ fn hosted_control_plane_provider(target: &str) -> Option<&'static str> {
     {
         Some("fly")
     } else if target.ends_with("vercel.json")
+        || target.contains(".vercel/project.json")
         || target.contains("vercel.app/api/internal")
         || target.contains("vercel project")
+        || target.contains("api.vercel.com")
     {
         Some("vercel")
-    } else if target.contains("aws rds") || target.contains("aws ec2 terminate") {
+    } else if target.ends_with("render.yaml")
+        || target.ends_with("render.yml")
+        || target.contains("api.render.com")
+        || target.contains("render.com/deploy")
+    {
+        Some("render")
+    } else if target.ends_with("netlify.toml")
+        || target.ends_with("netlify.json")
+        || target.contains("api.netlify.com")
+        || target.contains(".netlify.app")
+    {
+        Some("netlify")
+    } else if target.ends_with("Procfile")
+        || target.ends_with("heroku.yml")
+        || target.contains("api.heroku.com")
+        || target.contains("heroku.com/deploy")
+    {
+        Some("heroku")
+    } else if target.contains("supabase.com")
+        || target.contains("supabase.co")
+        || target.contains("supabase/config.toml")
+    {
+        Some("supabase")
+    } else if target.contains("neon.tech") {
+        Some("neon")
+    } else if target.contains("planetscale.com") {
+        Some("planetscale")
+    } else if target.contains("turso.tech") || target.contains("turso.io") {
+        Some("turso")
+    } else if target.contains("aws rds")
+        || target.contains("aws ec2 terminate")
+        || target.contains("aws s3 rm")
+        || target.contains("aws eks")
+    {
         Some("aws")
-    } else if target.contains("gcloud sql") || target.contains("gcloud compute") {
+    } else if target.contains("gcloud sql")
+        || target.contains("gcloud compute")
+        || target.contains("gcloud run")
+    {
         Some("gcloud")
-    } else if target.contains("az group") {
+    } else if target.contains("az group") || target.contains("az webapp") {
         Some("azure")
     } else {
-        None
+        production_api_provider_from_url(target)
     }
+}
+
+fn production_api_provider_from_url(target: &str) -> Option<&'static str> {
+    let url_start = target.find("https://").or_else(|| target.find("http://"))?;
+    let after_scheme = target[url_start..].trim_start_matches("https://").trim_start_matches("http://");
+    let host_end = after_scheme
+        .find(['/', ':', ' '])
+        .unwrap_or(after_scheme.len());
+    let host = &after_scheme[..host_end];
+    descry_context::production_api_provider(host)
 }
 
 fn looks_like_secret_path(target: &str) -> bool {
@@ -1685,6 +1832,7 @@ hard_blocks: []
                 project_config,
                 approvals_path,
                 behavior_path: &temp_path("behavior.json"),
+                project_index: None,
             },
         )
     }
@@ -1701,6 +1849,7 @@ hard_blocks: []
                 project_config,
                 approvals_path: &temp_path("approvals.jsonl"),
                 behavior_path: &temp_path("behavior.json"),
+                project_index: None,
             },
             Some(legacy_asset_policy_path),
         )
@@ -1720,6 +1869,7 @@ hard_blocks: []
                 project_config,
                 approvals_path,
                 behavior_path,
+                project_index: None,
             },
         )
     }
