@@ -1,7 +1,9 @@
 use std::collections::BTreeSet;
 
 use descry_core::acp::{Action, Actor, Asset, BlastRadius, Context, Intent};
-use descry_core::ActionContextPacket;
+use descry_core::{ActionContextPacket, InstructionProvenance};
+
+use crate::provenance;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -23,6 +25,8 @@ pub fn normalize_pretooluse(input: &CodexHookInput) -> ActionContextPacket {
     let target = target_for_tool(input);
     let targets = targets_for_tool(input, &target);
     let cwd = input.cwd.as_deref().unwrap_or("unknown");
+    let instruction_provenance: Option<InstructionProvenance> =
+        Some(provenance::classify_codex(&input.tool_name, &input.tool_input, input.cwd.as_deref()));
 
     ActionContextPacket {
         actor: Actor {
@@ -61,6 +65,7 @@ pub fn normalize_pretooluse(input: &CodexHookInput) -> ActionContextPacket {
             customer_impact: String::from("none"),
             financial_impact: String::from("none"),
         },
+        instruction_provenance,
     }
 }
 

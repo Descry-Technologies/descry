@@ -10,4 +10,5 @@ pub mod logs;
 pub mod policy;
 pub mod policy_source;
 pub mod scan;
+pub mod scope;
 pub mod task;

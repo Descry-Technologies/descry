@@ -1,9 +1,11 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+
+use descry_core::AssetGraphNode;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ProjectIndex {
@@ -18,6 +20,8 @@ pub struct ProjectIndex {
     pub config_paths: Vec<String>,
     pub secret_paths: Vec<String>,
     pub deploy_paths: Vec<String>,
+    #[serde(default)]
+    pub asset_graph: Vec<AssetGraphNode>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -50,6 +54,41 @@ pub fn write_project_index(index: &ProjectIndex, path: &Path) -> io::Result<()> 
 pub fn read_project_index(path: &Path) -> io::Result<ProjectIndex> {
     let body = fs::read_to_string(path)?;
     serde_json::from_str(&body).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+}
+
+pub fn read_codeowners_patterns(repo_root: &Path) -> io::Result<Vec<String>> {
+    for relative_path in [
+        ".github/CODEOWNERS",
+        "CODEOWNERS",
+        "docs/CODEOWNERS",
+        ".gitlab/CODEOWNERS",
+    ] {
+        let path = repo_root.join(relative_path);
+        if path.exists() {
+            return parse_codeowners_patterns(&fs::read_to_string(path)?);
+        }
+    }
+
+    Ok(Vec::new())
+}
+
+fn parse_codeowners_patterns(body: &str) -> io::Result<Vec<String>> {
+    let mut patterns = body
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                return None;
+            }
+            line.split_whitespace()
+                .next()
+                .filter(|pattern| !pattern.is_empty())
+                .map(ToString::to_string)
+        })
+        .collect::<Vec<_>>();
+    patterns.sort();
+    patterns.dedup();
+    Ok(patterns)
 }
 
 pub fn append_session_event(state_dir: &Path, event: &SessionEvent) -> io::Result<()> {
@@ -147,6 +186,7 @@ struct ProjectIndexBuilder {
     config_paths: BTreeSet<String>,
     secret_paths: BTreeSet<String>,
     deploy_paths: BTreeSet<String>,
+    asset_graph: BTreeMap<String, AssetGraphNode>,
 }
 
 impl ProjectIndexBuilder {
@@ -161,6 +201,7 @@ impl ProjectIndexBuilder {
             config_paths: BTreeSet::new(),
             secret_paths: BTreeSet::new(),
             deploy_paths: BTreeSet::new(),
+            asset_graph: BTreeMap::new(),
         }
     }
 
@@ -216,6 +257,7 @@ impl ProjectIndexBuilder {
         if is_deploy_path(&lowercase) {
             self.deploy_paths.insert(relative_path);
         }
+        self.detect_asset_graph_node(&lowercase);
     }
 
     fn detect_language(&mut self, relative_path: &str, basename: &str) {
@@ -262,6 +304,30 @@ impl ProjectIndexBuilder {
         }
     }
 
+    fn detect_asset_graph_node(&mut self, lowercase_path: &str) {
+        if let Some((provider, pattern)) = hosted_control_plane_config(lowercase_path) {
+            let node_id = format!("hosted-control-plane:{provider}");
+            self.asset_graph
+                .entry(node_id.clone())
+                .or_insert_with(|| AssetGraphNode {
+                    id: node_id,
+                    asset_type: String::from("hosted_control_plane"),
+                    sensitivity: String::from("critical"),
+                    environment: String::from("production_relevant"),
+                    default_action: String::from("require_approval"),
+                    patterns: Vec::new(),
+                    evidence: Vec::new(),
+                });
+            if let Some(node) = self
+                .asset_graph
+                .get_mut(&format!("hosted-control-plane:{provider}"))
+            {
+                push_unique(&mut node.patterns, pattern.to_string());
+                push_unique(&mut node.evidence, format!("file:{lowercase_path}"));
+            }
+        }
+    }
+
     fn finish(self) -> ProjectIndex {
         ProjectIndex {
             repo_name: self
@@ -279,7 +345,24 @@ impl ProjectIndexBuilder {
             config_paths: into_vec(self.config_paths),
             secret_paths: into_vec(self.secret_paths),
             deploy_paths: into_vec(self.deploy_paths),
+            asset_graph: self.asset_graph.into_values().collect(),
         }
+    }
+}
+
+fn hosted_control_plane_config(path: &str) -> Option<(&'static str, &'static str)> {
+    match path {
+        "railway.toml" => Some(("railway", "railway.toml")),
+        "fly.toml" => Some(("fly", "fly.toml")),
+        "vercel.json" | ".vercel/project.json" => Some(("vercel", "vercel.json")),
+        _ => None,
+    }
+}
+
+fn push_unique(values: &mut Vec<String>, value: String) {
+    if !values.contains(&value) {
+        values.push(value);
+        values.sort();
     }
 }
 
@@ -368,8 +451,8 @@ fn into_vec(values: BTreeSet<String>) -> Vec<String> {
 mod tests {
     use std::fs;
 
-    use super::build_project_index;
     use super::{append_session_event, read_recent_events, sanitized_event_target, SessionEvent};
+    use super::{build_project_index, read_codeowners_patterns};
 
     #[test]
     fn indexes_rust_workspace_shape() {
@@ -378,6 +461,7 @@ mod tests {
         write(tempdir.path().join("crates/app/src/lib.rs"), "");
         write(tempdir.path().join("tests/integration.rs"), "");
         write(tempdir.path().join(".github/workflows/ci.yml"), "");
+        write(tempdir.path().join("railway.toml"), "");
         write(tempdir.path().join(".env.production"), "");
         write(tempdir.path().join("target/debug/generated.rs"), "");
         write(tempdir.path().join(".git/HEAD"), "ref: refs/heads/main\n");
@@ -394,6 +478,10 @@ mod tests {
         assert!(index
             .secret_paths
             .contains(&String::from(".env.production")));
+        assert!(index.asset_graph.iter().any(|node| {
+            node.id == "hosted-control-plane:railway"
+                && node.patterns.contains(&String::from("railway.toml"))
+        }));
         assert!(!index.source_paths.contains(&String::from("target/**")));
     }
 
@@ -417,6 +505,27 @@ mod tests {
         assert!(!index
             .source_paths
             .contains(&String::from("node_modules/**")));
+    }
+
+    #[test]
+    fn reads_codeowners_patterns_in_stable_order() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        write(
+            tempdir.path().join(".github/CODEOWNERS"),
+            r#"
+# comment
+src/auth/** @auth-team
+*.md @docs
+src/auth/** @auth-team
+"#,
+        );
+
+        let patterns = read_codeowners_patterns(tempdir.path()).expect("codeowners reads");
+
+        assert_eq!(
+            patterns,
+            vec![String::from("*.md"), String::from("src/auth/**")]
+        );
     }
 
     #[test]

@@ -1,11 +1,11 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use descry_core::{
     ActionClass, ActionContextPacket, AssetMatch, ClassifiedAction, Confidence, Decision,
-    DecisionInput, DecisionOutput, RiskScore, RuntimeContextConfig, TaskEnvelope,
-    TaskEnvelopeBuilder, TaskSource,
+    DecisionInput, DecisionOutput, RiskScore, RuntimeContextConfig, ScopeContract, ScopePermitKind,
+    TaskEnvelope, TaskEnvelopeBuilder, TaskSource,
 };
 use descry_policy::{Policy, ProjectPolicy};
 
@@ -106,31 +106,11 @@ fn evaluate_targets(
     runtime: EvaluationRuntime<'_>,
     legacy_asset_policy_path: Option<&Path>,
 ) -> DecisionOutput {
-    let targets = action_targets(&input.acp);
-    let mut strongest_decision = None;
-
-    for target in targets {
-        let mut candidate_input = input.clone();
-        candidate_input.acp.action.target = target;
-        candidate_input.action = classify_action(&candidate_input.acp);
-        candidate_input.asset = match_runtime_asset(
-            &candidate_input.acp.action.target,
-            &runtime,
-            legacy_asset_policy_path,
-        );
-        candidate_input.task = TaskEnvelopeBuilder::new(&candidate_input.acp)
-            .matched_asset(candidate_input.asset.as_ref().map(|asset| asset.id.clone()))
-            .build();
-
-        let policy_decision = runtime.policy.evaluate(&candidate_input.acp);
-        let decision = apply_decision_layers(policy_decision, &candidate_input, &runtime);
-        strongest_decision = Some(match strongest_decision {
-            Some(current) => strongest(current, decision),
-            None => decision,
-        });
-    }
-
-    strongest_decision.expect("action targets are never empty")
+    expand_target_stage(&input.acp)
+        .into_iter()
+        .map(|target| evaluate_target_stage(&input, target, &runtime, legacy_asset_policy_path))
+        .reduce(strongest_verdict_stage)
+        .expect("action targets are never empty")
 }
 
 pub fn build_decision_input(acp: ActionContextPacket) -> DecisionInput {
@@ -153,6 +133,7 @@ fn build_decision_input_with_asset(
         .matched_asset(asset.as_ref().map(|asset| asset.id.clone()))
         .build();
     let action = classify_action(&acp);
+    let instruction_provenance = acp.instruction_provenance;
 
     DecisionInput {
         acp,
@@ -160,6 +141,7 @@ fn build_decision_input_with_asset(
         task,
         action,
         asset,
+        instruction_provenance,
     }
 }
 
@@ -171,6 +153,65 @@ fn match_runtime_asset(
     legacy_asset_policy_path
         .and_then(|asset_policy_path| match_legacy_asset(asset_policy_path, target))
         .or_else(|| runtime.project_config.match_asset(target))
+        .or_else(|| semantic_asset_graph_match(target))
+}
+
+fn expand_target_stage(acp: &ActionContextPacket) -> Vec<String> {
+    action_targets(acp)
+}
+
+fn evaluate_target_stage(
+    input: &DecisionInput,
+    target: String,
+    runtime: &EvaluationRuntime<'_>,
+    legacy_asset_policy_path: Option<&Path>,
+) -> DecisionOutput {
+    let candidate_input =
+        prepare_target_input_stage(input, target, runtime, legacy_asset_policy_path);
+    let tier_one_decision = tier_one_policy_stage(&candidate_input, runtime);
+
+    verdict_layer_stage(tier_one_decision, &candidate_input, runtime)
+}
+
+fn prepare_target_input_stage(
+    input: &DecisionInput,
+    target: String,
+    runtime: &EvaluationRuntime<'_>,
+    legacy_asset_policy_path: Option<&Path>,
+) -> DecisionInput {
+    let mut candidate_input = input.clone();
+    candidate_input.acp.action.target = target;
+    candidate_input.action = classify_action_stage(&candidate_input.acp);
+    candidate_input.asset = asset_match_stage(
+        &candidate_input.acp.action.target,
+        runtime,
+        legacy_asset_policy_path,
+    );
+    candidate_input.task =
+        task_envelope_stage(&candidate_input.acp, candidate_input.asset.as_ref());
+    candidate_input
+}
+
+fn classify_action_stage(acp: &ActionContextPacket) -> ClassifiedAction {
+    classify_action(acp)
+}
+
+fn asset_match_stage(
+    target: &str,
+    runtime: &EvaluationRuntime<'_>,
+    legacy_asset_policy_path: Option<&Path>,
+) -> Option<AssetMatch> {
+    match_runtime_asset(target, runtime, legacy_asset_policy_path)
+}
+
+fn task_envelope_stage(acp: &ActionContextPacket, asset: Option<&AssetMatch>) -> TaskEnvelope {
+    TaskEnvelopeBuilder::new(acp)
+        .matched_asset(asset.map(|asset| asset.id.clone()))
+        .build()
+}
+
+fn tier_one_policy_stage(input: &DecisionInput, runtime: &EvaluationRuntime<'_>) -> DecisionOutput {
+    runtime.policy.evaluate(&input.acp)
 }
 
 pub fn classify_action(acp: &ActionContextPacket) -> ClassifiedAction {
@@ -431,23 +472,34 @@ fn classify_mcp(acp: &ActionContextPacket) -> ActionClass {
     }
 }
 
-fn apply_decision_layers(
-    decision: DecisionOutput,
+fn verdict_layer_stage(
+    tier_one_decision: DecisionOutput,
     input: &DecisionInput,
     runtime: &EvaluationRuntime<'_>,
 ) -> DecisionOutput {
     let acp = &input.acp;
-    if decision.decision == Decision::Block && acp.action.action_type == "mcp.call" {
-        return apply_mcp_approval_override(decision, acp, runtime.approvals_path);
+    if tier_one_decision.decision == Decision::Block && acp.action.action_type == "mcp.call" {
+        return mcp_approval_override_stage(tier_one_decision, acp, runtime.approvals_path);
     }
-    if decision.decision == Decision::Block {
-        return decision;
+    if tier_one_decision.decision == Decision::Block {
+        return tier_one_decision;
     }
 
-    let asset_decision = asset_policy_decision(input, runtime);
-    let action_decision = action_policy_decision(input, runtime);
+    let action_decision = action_policy_stage(input, runtime);
+    let asset_decision = asset_policy_stage(input, runtime);
 
-    strongest(strongest(decision, action_decision), asset_decision)
+    strongest_verdict_stage(
+        strongest_verdict_stage(tier_one_decision, action_decision),
+        asset_decision,
+    )
+}
+
+fn asset_policy_stage(input: &DecisionInput, runtime: &EvaluationRuntime<'_>) -> DecisionOutput {
+    asset_policy_decision(input, runtime)
+}
+
+fn action_policy_stage(input: &DecisionInput, runtime: &EvaluationRuntime<'_>) -> DecisionOutput {
+    action_policy_decision(input, runtime)
 }
 
 fn asset_policy_decision(input: &DecisionInput, runtime: &EvaluationRuntime<'_>) -> DecisionOutput {
@@ -456,11 +508,18 @@ fn asset_policy_decision(input: &DecisionInput, runtime: &EvaluationRuntime<'_>)
         return allow_fallback("no asset policy matched");
     };
 
-    if asset.default_action == "block" && acp.action.action_type == "file.read" {
-        return asset_block_decision(acp, asset, "read", Vec::new());
+    if asset.default_action == "block" && acp.action.action_type != "file.write" {
+        return asset_block_decision(acp, asset, action_verb(acp), Vec::new());
+    }
+    if is_semantic_asset_graph_asset(asset) {
+        return asset_graph_asset_decision(input, runtime, asset);
     }
     if acp.action.action_type != "file.write" {
         return allow_fallback("asset policy does not apply to this action type");
+    }
+
+    if let Some(scope_decision) = scope_contract_decision(input, runtime, asset) {
+        return scope_decision;
     }
 
     let context_match = task_context_match(input);
@@ -519,6 +578,200 @@ fn asset_policy_decision(input: &DecisionInput, runtime: &EvaluationRuntime<'_>)
         "allow" => allow_fallback("asset policy allows this target"),
         _ => allow_fallback("unknown asset default action falls back to allow"),
     }
+}
+
+fn asset_graph_asset_decision(
+    input: &DecisionInput,
+    runtime: &EvaluationRuntime<'_>,
+    asset: &AssetMatch,
+) -> DecisionOutput {
+    if has_live_asset_approval(input, runtime) {
+        return DecisionOutput {
+            decision: Decision::AllowWithLog,
+            risk_score: RiskScore::try_from(60).expect("60 is a valid risk score"),
+            confidence: Confidence::try_from(0.9).expect("0.9 is a valid confidence"),
+            reason: format!(
+                "scoped approval matched {} target {} (asset graph: {})",
+                asset.sensitivity, input.acp.action.target, asset.id
+            ),
+            conditions: vec![String::from("Approval applies only until its TTL expires")],
+        };
+    }
+
+    match asset.default_action.as_str() {
+        "block" => asset_block_decision(&input.acp, asset, action_verb(&input.acp), Vec::new()),
+        "require_approval" => DecisionOutput {
+            decision: Decision::RequireApproval,
+            risk_score: RiskScore::try_from(82).expect("82 is a valid risk score"),
+            confidence: Confidence::try_from(0.9).expect("0.9 is a valid confidence"),
+            reason: format!(
+                "{} target {} requires approval by asset graph (asset: {}, action: {:?})",
+                asset.sensitivity, input.acp.action.target, asset.id, input.action.class
+            ),
+            conditions: vec![approval_condition(&input.acp)],
+        },
+        "allow" => allow_fallback("asset graph allows this target"),
+        _ => allow_fallback("unknown asset graph default action falls back to allow"),
+    }
+}
+
+fn is_semantic_asset_graph_asset(asset: &AssetMatch) -> bool {
+    asset.id.starts_with("hosted-control-plane:") || asset.id == "mcp-production-control-plane"
+}
+
+fn has_live_asset_approval(input: &DecisionInput, runtime: &EvaluationRuntime<'_>) -> bool {
+    let now = current_epoch_seconds();
+    match input.acp.action.action_type.as_str() {
+        "mcp.call" => descry_memory::has_live_approval_for_mcp(
+            runtime.approvals_path,
+            &input.acp.action.target,
+            now,
+        )
+        .unwrap_or(false),
+        "file.read" | "file.write" => descry_memory::has_live_approval_for_path(
+            runtime.approvals_path,
+            &input.acp.action.target,
+            now,
+        )
+        .unwrap_or(false),
+        _ => false,
+    }
+}
+
+fn approval_condition(acp: &ActionContextPacket) -> String {
+    let scope = if acp.action.action_type == "mcp.call" {
+        format!("mcp:{}", acp.action.target)
+    } else {
+        approval_scope_hint(&acp.action.target)
+    };
+    format!("Run: descry approve --scope '{scope}' --ttl 30m")
+}
+
+fn action_verb(acp: &ActionContextPacket) -> &'static str {
+    match acp.action.action_type.as_str() {
+        "file.read" => "read",
+        "file.write" => "write",
+        "mcp.call" => "MCP",
+        "shell.exec" => "shell",
+        _ => "action",
+    }
+}
+
+fn scope_contract_decision(
+    input: &DecisionInput,
+    runtime: &EvaluationRuntime<'_>,
+    asset: &AssetMatch,
+) -> Option<DecisionOutput> {
+    if asset.default_action != "allow_if_context_matches" || asset.sensitivity != "normal" {
+        return None;
+    }
+
+    let scope_contracts_path = scope_contracts_path(runtime.approvals_path);
+    let contracts =
+        descry_memory::active_scope_contracts(&scope_contracts_path, current_epoch_seconds())
+            .unwrap_or_default();
+    if contracts.is_empty() {
+        return None;
+    }
+
+    if let Some(scope_match) = matching_scope_permit(input, &contracts) {
+        return Some(DecisionOutput {
+            decision: Decision::Allow,
+            risk_score: RiskScore::try_from(18).expect("18 is a valid risk score"),
+            confidence: Confidence::try_from(0.85).expect("0.85 is a valid confidence"),
+            reason: format!(
+                "allowed: {} matched active scope contract {} permit {} for action {:?} (blast_radius: reversible={}, customer_impact={}, financial_impact={})",
+                input.acp.action.target,
+                scope_match.contract_id,
+                scope_match.permit_pattern,
+                input.action.class,
+                input.acp.blast_radius.reversible,
+                input.acp.blast_radius.customer_impact,
+                input.acp.blast_radius.financial_impact
+            ),
+            conditions: Vec::new(),
+        });
+    }
+
+    Some(DecisionOutput {
+        decision: Decision::RequireApproval,
+        risk_score: RiskScore::try_from(70).expect("70 is a valid risk score"),
+        confidence: Confidence::try_from(0.85).expect("0.85 is a valid confidence"),
+        reason: format!(
+            "normal write target {} does not match active scope contract by semantic scope stage (action: {:?}, blast_radius: reversible={}, customer_impact={}, financial_impact={}, asset: {})",
+            input.acp.action.target,
+            input.action.class,
+            input.acp.blast_radius.reversible,
+            input.acp.blast_radius.customer_impact,
+            input.acp.blast_radius.financial_impact,
+            asset.id
+        ),
+        conditions: vec![format!(
+            "Run: descry approve --scope '{}' --ttl 30m",
+            approval_scope_hint(&input.acp.action.target)
+        )],
+    })
+}
+
+struct ScopePermitMatch {
+    contract_id: String,
+    permit_pattern: String,
+}
+
+fn matching_scope_permit(
+    input: &DecisionInput,
+    contracts: &[ScopeContract],
+) -> Option<ScopePermitMatch> {
+    contracts.iter().find_map(|contract| {
+        contract.permits.iter().find_map(|permit| {
+            let action_matches = permit.action_classes.contains(&input.action.class);
+            let target_matches = match permit.kind {
+                ScopePermitKind::Path => pattern_matches(&permit.pattern, &input.acp.action.target),
+                ScopePermitKind::Asset => input
+                    .asset
+                    .as_ref()
+                    .is_some_and(|asset| permit.pattern == asset.id),
+                ScopePermitKind::Action => project_action_key(&input.action.class)
+                    .is_some_and(|action_key| permit.pattern == action_key),
+            };
+
+            if action_matches && target_matches {
+                Some(ScopePermitMatch {
+                    contract_id: contract.id.clone(),
+                    permit_pattern: permit.pattern.clone(),
+                })
+            } else {
+                None
+            }
+        })
+    })
+}
+
+fn scope_contracts_path(approvals_path: &Path) -> PathBuf {
+    if approvals_path
+        .file_name()
+        .is_some_and(|file_name| file_name == "approvals.jsonl")
+    {
+        return approvals_path
+            .parent()
+            .map(|parent| parent.join("scope-contracts.jsonl"))
+            .unwrap_or_else(|| PathBuf::from("scope-contracts.jsonl"));
+    }
+
+    approvals_path.with_extension("scope-contracts.jsonl")
+}
+
+fn pattern_matches(pattern: &str, target: &str) -> bool {
+    if pattern == "*" || pattern == target {
+        return true;
+    }
+    if let Some(prefix) = pattern.strip_suffix("/**") {
+        return target == prefix || target.starts_with(&format!("{prefix}/"));
+    }
+    if let Some(prefix) = pattern.strip_suffix('*') {
+        return target.starts_with(prefix);
+    }
+    false
 }
 
 fn asset_block_decision(
@@ -689,6 +942,10 @@ fn strongest(left: DecisionOutput, right: DecisionOutput) -> DecisionOutput {
     }
 }
 
+fn strongest_verdict_stage(left: DecisionOutput, right: DecisionOutput) -> DecisionOutput {
+    strongest(left, right)
+}
+
 fn decision_rank(decision: &Decision) -> u8 {
     match decision {
         Decision::Allow => 0,
@@ -735,6 +992,14 @@ fn apply_mcp_approval_override(
     } else {
         decision
     }
+}
+
+fn mcp_approval_override_stage(
+    decision: DecisionOutput,
+    acp: &ActionContextPacket,
+    approvals_path: &Path,
+) -> DecisionOutput {
+    apply_mcp_approval_override(decision, acp, approvals_path)
 }
 
 #[allow(dead_code)]
@@ -1140,6 +1405,66 @@ fn match_legacy_asset(asset_policy_path: &Path, target: &str) -> Option<AssetMat
     })
 }
 
+fn semantic_asset_graph_match(target: &str) -> Option<AssetMatch> {
+    let lowercase = target.to_ascii_lowercase();
+    if looks_like_production_mcp_target(&lowercase) {
+        return Some(AssetMatch {
+            id: String::from("mcp-production-control-plane"),
+            sensitivity: String::from("critical"),
+            default_action: String::from("require_approval"),
+        });
+    }
+    if let Some(provider) = hosted_control_plane_provider(&lowercase) {
+        return Some(AssetMatch {
+            id: format!("hosted-control-plane:{provider}"),
+            sensitivity: String::from("critical"),
+            default_action: String::from("require_approval"),
+        });
+    }
+    None
+}
+
+fn looks_like_production_mcp_target(target: &str) -> bool {
+    target.contains("prod-mcp")
+        || target.contains("production-mcp")
+        || target.contains("admin-mcp")
+        || target.contains("control-plane-mcp")
+        || target.contains("mcp-prod")
+        || target.contains("mcp-production")
+        || target.contains("mcp-admin")
+        || target.contains("mcp-control-plane")
+}
+
+fn hosted_control_plane_provider(target: &str) -> Option<&'static str> {
+    if target.ends_with("railway.toml")
+        || target.contains("api.railway.app")
+        || target.contains("railway volume")
+        || target.contains("railway up")
+    {
+        Some("railway")
+    } else if target.ends_with("fly.toml")
+        || target.contains("api.fly.io")
+        || target.contains("fly apps")
+        || target.contains("fly volumes")
+        || target.contains("fly deploy")
+    {
+        Some("fly")
+    } else if target.ends_with("vercel.json")
+        || target.contains("vercel.app/api/internal")
+        || target.contains("vercel project")
+    {
+        Some("vercel")
+    } else if target.contains("aws rds") || target.contains("aws ec2 terminate") {
+        Some("aws")
+    } else if target.contains("gcloud sql") || target.contains("gcloud compute") {
+        Some("gcloud")
+    } else if target.contains("az group") {
+        Some("azure")
+    } else {
+        None
+    }
+}
+
 fn looks_like_secret_path(target: &str) -> bool {
     let lowercase_target = target.to_ascii_lowercase();
     lowercase_target.contains(".env")
@@ -1170,7 +1495,9 @@ fn current_epoch_seconds() -> u64 {
 #[cfg(test)]
 mod tests {
     use descry_core::acp::{Action, Actor, Asset, BlastRadius, Context, Intent};
-    use descry_core::Decision;
+    use descry_core::{
+        Decision, EvidenceRef, EvidenceSource, ScopeContract, ScopePermit, ScopePermitKind,
+    };
     use descry_memory::Approval;
     use descry_policy::Policy;
 
@@ -1214,6 +1541,7 @@ mod tests {
                 customer_impact: String::from("none"),
                 financial_impact: String::from("none"),
             },
+            instruction_provenance: None,
         }
     }
 
@@ -1318,6 +1646,11 @@ hard_blocks: []
         .expect("policy loads")
     }
 
+    fn safe_defaults_policy() -> Policy {
+        Policy::load_yaml(include_str!("../../../policies/safe-defaults.yml"))
+            .expect("safe defaults policy loads")
+    }
+
     fn temp_path(name: &str) -> std::path::PathBuf {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1373,6 +1706,67 @@ hard_blocks: []
         )
     }
 
+    fn evaluate_acp_with_memory(
+        acp: ActionContextPacket,
+        project_config: &ProjectPolicy,
+        policy: &Policy,
+        approvals_path: &Path,
+        behavior_path: &Path,
+    ) -> DecisionOutput {
+        evaluate(
+            build_decision_input(acp),
+            EvaluationRuntime {
+                policy,
+                project_config,
+                approvals_path,
+                behavior_path,
+            },
+        )
+    }
+
+    fn append_scope_contract(
+        approvals_path: &Path,
+        pattern: &str,
+        action_classes: Vec<ActionClass>,
+    ) {
+        let contract = ScopeContract::signed(
+            "Fix auth session",
+            vec![EvidenceRef::new(
+                EvidenceSource::ActiveTask,
+                "active-task",
+                "Fix auth session",
+            )],
+            vec![ScopePermit::new(
+                ScopePermitKind::Path,
+                pattern,
+                action_classes,
+                "test scope",
+            )],
+            1,
+            u64::MAX,
+            0.8,
+        )
+        .expect("scope contract signs");
+        descry_memory::append_scope_contract(&scope_contracts_path(approvals_path), &contract)
+            .expect("scope contract appends");
+    }
+
+    fn append_malformed_scope_contract(approvals_path: &Path) {
+        fs::write(scope_contracts_path(approvals_path), "not-json\n")
+            .expect("malformed scope contract writes");
+    }
+
+    fn decision_fingerprint(decision: &DecisionOutput) -> String {
+        format!(
+            "{:?}|{}|{}|{}|{:?}",
+            decision.decision,
+            decision.risk_score.0,
+            decision.confidence.0,
+            decision.reason,
+            decision.conditions
+        )
+    }
+
     fn active_file_write(target: &str, task: &str) -> ActionContextPacket {
         let mut acp = acp("file.write", target);
         acp.intent.active_task = Some(task.to_string());
@@ -1389,6 +1783,226 @@ hard_blocks: []
 
         assert_eq!(decision.decision, Decision::Block);
         assert!(decision.reason.contains("asset policy"));
+    }
+
+    #[test]
+    fn active_scope_contract_allows_matching_source_write_without_task_context() {
+        let approvals_path = temp_path("scope-approvals.jsonl");
+        let behavior_path = temp_path("scope-behavior.json");
+        append_scope_contract(&approvals_path, "src/auth/**", vec![ActionClass::FileWrite]);
+
+        let decision = evaluate_acp_with_memory(
+            acp("file.write", "src/auth/session.rs"),
+            &ProjectPolicy::default(),
+            &no_hard_blocks_policy(),
+            &approvals_path,
+            &behavior_path,
+        );
+
+        assert_eq!(decision.decision, Decision::Allow);
+        assert!(decision.reason.contains("active scope contract"));
+        assert!(decision.reason.contains("permit src/auth/**"));
+    }
+
+    #[test]
+    fn active_scope_contract_mismatch_requires_approval() {
+        let approvals_path = temp_path("scope-mismatch-approvals.jsonl");
+        let behavior_path = temp_path("scope-mismatch-behavior.json");
+        append_scope_contract(&approvals_path, "src/auth/**", vec![ActionClass::FileWrite]);
+
+        let decision = evaluate_acp_with_memory(
+            acp("file.write", "src/billing/invoice.rs"),
+            &ProjectPolicy::default(),
+            &no_hard_blocks_policy(),
+            &approvals_path,
+            &behavior_path,
+        );
+
+        assert_eq!(decision.decision, Decision::RequireApproval);
+        assert!(decision
+            .reason
+            .contains("does not match active scope contract"));
+        assert!(decision.reason.contains("semantic scope stage"));
+    }
+
+    #[test]
+    fn active_scope_contract_does_not_bypass_infra_approval() {
+        let approvals_path = temp_path("scope-infra-approvals.jsonl");
+        let behavior_path = temp_path("scope-infra-behavior.json");
+        append_scope_contract(
+            &approvals_path,
+            ".github/workflows/**",
+            vec![ActionClass::FileWrite],
+        );
+
+        let decision = evaluate_acp_with_memory(
+            acp("file.write", ".github/workflows/deploy.yml"),
+            &ProjectPolicy::default(),
+            &no_hard_blocks_policy(),
+            &approvals_path,
+            &behavior_path,
+        );
+
+        assert_eq!(decision.decision, Decision::RequireApproval);
+        assert!(decision.reason.contains("asset policy"));
+        assert!(!decision.reason.contains("active scope contract"));
+    }
+
+    #[test]
+    fn semantic_asset_graph_requires_approval_for_railway_config_without_project_rule() {
+        let project_config = ProjectPolicy::load_yaml(
+            r#"
+project:
+  name: test
+assets: []
+"#,
+        )
+        .expect("project policy loads");
+
+        let decision = evaluate_acp(acp("file.write", "railway.toml"), &project_config);
+
+        assert_eq!(decision.decision, Decision::RequireApproval);
+        assert!(decision.reason.contains("asset graph"));
+        assert!(decision.reason.contains("hosted-control-plane:railway"));
+    }
+
+    #[test]
+    fn semantic_asset_graph_requires_approval_for_production_mcp_without_hard_block() {
+        let decision = evaluate_acp(
+            acp("mcp.call", "https://prod-mcp.example.com/admin"),
+            &ProjectPolicy::default(),
+        );
+
+        assert_eq!(decision.decision, Decision::RequireApproval);
+        assert!(decision.reason.contains("asset graph"));
+        assert!(decision.reason.contains("mcp-production-control-plane"));
+    }
+
+    #[test]
+    fn semantic_asset_graph_does_not_weaken_destructive_cloud_block() {
+        let decision = evaluate_acp(
+            acp(
+                "shell.exec",
+                "curl -X DELETE https://api.railway.app/v1/volumes/abc",
+            ),
+            &ProjectPolicy::default(),
+        );
+
+        assert_eq!(decision.decision, Decision::Block);
+        assert!(decision.reason.contains("action policy"));
+    }
+
+    #[test]
+    fn invalid_scope_contract_does_not_allow_source_write() {
+        let approvals_path = temp_path("scope-invalid-approvals.jsonl");
+        let behavior_path = temp_path("scope-invalid-behavior.json");
+        append_malformed_scope_contract(&approvals_path);
+
+        let decision = evaluate_acp_with_memory(
+            acp("file.write", "src/auth/session.rs"),
+            &ProjectPolicy::default(),
+            &no_hard_blocks_policy(),
+            &approvals_path,
+            &behavior_path,
+        );
+
+        assert_eq!(decision.decision, Decision::RequireApproval);
+        assert!(!decision.reason.contains("active scope contract"));
+    }
+
+    #[test]
+    fn representative_verdicts_are_deterministic() {
+        let project_config = ProjectPolicy::default();
+        let safe_defaults = safe_defaults_policy();
+        let no_hard_blocks = no_hard_blocks_policy();
+        let mut mcp_destroy = acp("mcp.call", "prod-mcp:delete_project");
+        mcp_destroy.action.argument_keys = vec![String::from("confirm_destroy")];
+        let cases = [
+            (
+                "tier one hard block",
+                acp("shell.exec", "rm -rf ~"),
+                &safe_defaults,
+            ),
+            (
+                "matching source write",
+                active_file_write("src/auth/session.rs", "fix src/auth/session.rs"),
+                &no_hard_blocks,
+            ),
+            (
+                "infra approval",
+                active_file_write(".github/workflows/deploy.yml", "fix deployment workflow"),
+                &no_hard_blocks,
+            ),
+            ("mcp destructive", mcp_destroy, &safe_defaults),
+        ];
+
+        for (name, acp, policy) in cases {
+            let approvals_path = temp_path(&format!("{name}-approvals.jsonl"));
+            let behavior_path = temp_path(&format!("{name}-behavior.json"));
+            let first = evaluate_acp_with_memory(
+                acp.clone(),
+                &project_config,
+                policy,
+                &approvals_path,
+                &behavior_path,
+            );
+            let second = evaluate_acp_with_memory(
+                acp,
+                &project_config,
+                policy,
+                &approvals_path,
+                &behavior_path,
+            );
+
+            assert_eq!(
+                decision_fingerprint(&first),
+                decision_fingerprint(&second),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn current_critical_verdicts_are_preserved() {
+        let safe_defaults = safe_defaults_policy();
+        let project_config = ProjectPolicy::default();
+        let approvals_path = temp_path("critical-approvals.jsonl");
+        let behavior_path = temp_path("critical-behavior.json");
+
+        let rm_home = evaluate_acp_with_memory(
+            acp("shell.exec", "rm -rf ~"),
+            &project_config,
+            &safe_defaults,
+            &approvals_path,
+            &behavior_path,
+        );
+        assert_eq!(rm_home.decision, Decision::Block);
+
+        let source_edit = evaluate_acp(
+            active_file_write("src/auth/session.rs", "fix src/auth/session.rs"),
+            &project_config,
+        );
+        assert_eq!(source_edit.decision, Decision::Allow);
+
+        let infra_edit = evaluate_acp(
+            active_file_write(".github/workflows/deploy.yml", "fix deployment workflow"),
+            &project_config,
+        );
+        assert_eq!(infra_edit.decision, Decision::RequireApproval);
+
+        let mut mcp_destroy = acp("mcp.call", "prod-mcp:delete_project");
+        mcp_destroy.action.argument_keys = vec![String::from("confirm_destroy")];
+        let mcp_decision = evaluate_acp_with_memory(
+            mcp_destroy,
+            &project_config,
+            &safe_defaults,
+            &approvals_path,
+            &behavior_path,
+        );
+        assert!(matches!(
+            mcp_decision.decision,
+            Decision::Block | Decision::RequireApproval
+        ));
     }
 
     #[test]

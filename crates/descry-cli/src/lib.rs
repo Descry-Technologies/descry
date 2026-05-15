@@ -96,6 +96,10 @@ pub enum Commands {
         #[command(subcommand)]
         action: PolicyAction,
     },
+    Scope {
+        #[command(subcommand)]
+        action: ScopeAction,
+    },
     Task {
         #[command(subcommand)]
         action: TaskAction,
@@ -227,6 +231,30 @@ pub enum TaskAction {
     Clear {
         #[arg(long, default_value = ".descry/context.md")]
         path: PathBuf,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ScopeAction {
+    Build {
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+        #[arg(long, default_value = ".descry/context.md")]
+        context: PathBuf,
+        #[arg(long, default_value = ".descry/state/project-index.json")]
+        project_index: PathBuf,
+        #[arg(long, default_value = ".descry/memory/scope-contracts.jsonl")]
+        cache: PathBuf,
+        #[arg(long, default_value_t = 3600)]
+        ttl_seconds: u64,
+        #[arg(long)]
+        created_at_epoch_seconds: Option<u64>,
+    },
+    Show {
+        #[arg(long, default_value = ".descry/memory/scope-contracts.jsonl")]
+        cache: PathBuf,
+        #[arg(long)]
+        now_epoch_seconds: Option<u64>,
     },
 }
 
@@ -533,6 +561,7 @@ pub fn run_with_io(
         ),
         Commands::Daemon { action } => commands::daemon::run(action),
         Commands::Policy { action } => commands::policy::run(action, output),
+        Commands::Scope { action } => commands::scope::run(action, output),
         Commands::Task { action } => commands::task::run(action, output),
         Commands::Approve {
             scope,

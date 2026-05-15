@@ -273,6 +273,7 @@ dependencies = [
 name = "descry-context"
 version = "0.1.0"
 dependencies = [
+ "descry-core",
  "serde",
  "serde_json",
  "tempfile",
@@ -284,6 +285,7 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "sha2",
  "time",
  "uuid",
 ]
@@ -314,6 +316,7 @@ dependencies = [
 name = "descry-memory"
 version = "0.1.0"
 dependencies = [
+ "descry-core",
  "serde",
  "serde_json",
  "serde_yml",

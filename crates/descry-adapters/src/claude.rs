@@ -1,5 +1,7 @@
 use descry_core::acp::{Action, Actor, Asset, BlastRadius, Context, Intent};
-use descry_core::ActionContextPacket;
+use descry_core::{ActionContextPacket, InstructionProvenance};
+
+use crate::provenance;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -37,6 +39,8 @@ pub fn normalize_pretooluse(input: &ClaudeHookInput) -> ActionContextPacket {
     let action_type = action_type_for_tool(&input.tool_name);
     let verb = verb_for_action_type(action_type);
     let cwd = input.cwd.as_deref().unwrap_or("unknown");
+    let instruction_provenance: Option<InstructionProvenance> =
+        Some(provenance::classify_claude(&input.tool_name, &input.tool_input, input.cwd.as_deref()));
 
     ActionContextPacket {
         actor: Actor {
@@ -75,6 +79,7 @@ pub fn normalize_pretooluse(input: &ClaudeHookInput) -> ActionContextPacket {
             customer_impact: String::from("none"),
             financial_impact: String::from("none"),
         },
+        instruction_provenance,
     }
 }
 

@@ -1,5 +1,27 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InstructionProvenance {
+    User,
+    AgentReasoning,
+    ToolOutput,
+    RepoContent,
+    WebContent,
+}
+
+impl InstructionProvenance {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::AgentReasoning => "agent reasoning",
+            Self::ToolOutput => "external tool output",
+            Self::RepoContent => "repository content",
+            Self::WebContent => "web content",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct Source {
     #[serde(rename = "type")]
@@ -69,4 +91,6 @@ pub struct ActionContextPacket {
     pub asset: Asset,
     pub context: Context,
     pub blast_radius: BlastRadius,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instruction_provenance: Option<InstructionProvenance>,
 }

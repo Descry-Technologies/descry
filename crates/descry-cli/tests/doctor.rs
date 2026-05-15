@@ -123,6 +123,7 @@ actions: {}
             config_paths: Vec::new(),
             secret_paths: Vec::new(),
             deploy_paths: Vec::new(),
+            asset_graph: Vec::new(),
         },
         &project.join(".descry/state/project-index.json"),
     )

@@ -378,6 +378,7 @@ fn claude_pretooluse_enriches_context_from_project_index() {
             config_paths: Vec::new(),
             secret_paths: Vec::new(),
             deploy_paths: Vec::new(),
+            asset_graph: Vec::new(),
         },
         &state.join("project-index.json"),
     )

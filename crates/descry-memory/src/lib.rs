@@ -2,6 +2,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 
+use descry_core::ScopeContract;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -203,6 +204,106 @@ pub fn has_live_approval_for_once(
     Ok(load_approvals(path)?
         .iter()
         .any(|approval| approval.matches_once(acp_hash, now_epoch_seconds)))
+}
+
+pub fn append_scope_contract(path: &Path, contract: &ScopeContract) -> Result<(), MemoryError> {
+    if !contract.verify_signature() {
+        return Err(MemoryError::InvalidScopeContract(String::from(
+            "scope contract signature did not verify",
+        )));
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+    serde_json::to_writer(&mut file, contract)?;
+    file.write_all(b"\n")?;
+    file.flush()?;
+    file.sync_data()?;
+    Ok(())
+}
+
+pub fn load_scope_contracts(path: &Path) -> Result<Vec<ScopeContract>, MemoryError> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let file = OpenOptions::new().read(true).open(path)?;
+    let mut contracts = Vec::new();
+    for line in BufReader::new(file).lines() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        if let Ok(contract) = serde_json::from_str::<ScopeContract>(&line) {
+            contracts.push(contract);
+        }
+    }
+    Ok(contracts)
+}
+
+pub fn active_scope_contracts(
+    path: &Path,
+    now_epoch_seconds: u64,
+) -> Result<Vec<ScopeContract>, MemoryError> {
+    Ok(load_scope_contracts(path)?
+        .into_iter()
+        .filter(|contract| contract.is_live_at(now_epoch_seconds) && contract.verify_signature())
+        .collect())
+}
+
+pub fn find_active_scope_contract(
+    path: &Path,
+    contract_id: &str,
+    now_epoch_seconds: u64,
+) -> Result<Option<ScopeContract>, MemoryError> {
+    Ok(active_scope_contracts(path, now_epoch_seconds)?
+        .into_iter()
+        .find(|contract| contract.id == contract_id))
+}
+
+pub fn expire_scope_contract(
+    path: &Path,
+    contract_id: &str,
+    now_epoch_seconds: u64,
+) -> Result<bool, MemoryError> {
+    let mut changed = false;
+    let mut contracts = load_scope_contracts(path)?;
+    for contract in &mut contracts {
+        if contract.id == contract_id && contract.expires_at_epoch_seconds > now_epoch_seconds {
+            *contract = contract
+                .resigned_with_expiry(now_epoch_seconds)
+                .map_err(|error| MemoryError::InvalidScopeContract(error.to_string()))?;
+            changed = true;
+        }
+    }
+
+    if changed {
+        write_scope_contracts(path, &contracts)?;
+    }
+
+    Ok(changed)
+}
+
+fn write_scope_contracts(path: &Path, contracts: &[ScopeContract]) -> Result<(), MemoryError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(path)?;
+    for contract in contracts {
+        if contract.verify_signature() {
+            serde_json::to_writer(&mut file, contract)?;
+            file.write_all(b"\n")?;
+        }
+    }
+    file.flush()?;
+    file.sync_data()?;
+    Ok(())
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -457,6 +558,7 @@ pub enum MemoryError {
     Yaml(serde_yml::Error),
     MalformedRecord { line: u64, reason: String },
     InvalidApproval(String),
+    InvalidScopeContract(String),
 }
 
 impl std::fmt::Display for MemoryError {
@@ -469,6 +571,9 @@ impl std::fmt::Display for MemoryError {
                 write!(formatter, "malformed record at line {line}: {reason}")
             }
             Self::InvalidApproval(reason) => write!(formatter, "invalid approval: {reason}"),
+            Self::InvalidScopeContract(reason) => {
+                write!(formatter, "invalid scope contract: {reason}")
+            }
         }
     }
 }
@@ -479,7 +584,9 @@ impl std::error::Error for MemoryError {
             Self::Io(error) => Some(error),
             Self::Serde(error) => Some(error),
             Self::Yaml(error) => Some(error),
-            Self::MalformedRecord { .. } | Self::InvalidApproval(_) => None,
+            Self::MalformedRecord { .. }
+            | Self::InvalidApproval(_)
+            | Self::InvalidScopeContract(_) => None,
         }
     }
 }
@@ -499,12 +606,18 @@ impl From<serde_json::Error> for MemoryError {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::io::Write;
 
     use super::{
-        append_approval, behavior_count, has_live_approval_for_action, has_live_approval_for_mcp,
-        has_live_approval_for_path, has_live_approval_for_rule, has_live_approval_for_target,
-        live_approvals, load_asset_policy, match_asset, record_behavior, revoke_approval_scope,
-        validate_approval_scope, Approval, ApprovalScopeKind,
+        active_scope_contracts, append_approval, append_scope_contract, behavior_count,
+        expire_scope_contract, find_active_scope_contract, has_live_approval_for_action,
+        has_live_approval_for_mcp, has_live_approval_for_path, has_live_approval_for_rule,
+        has_live_approval_for_target, live_approvals, load_asset_policy, load_scope_contracts,
+        match_asset, record_behavior, revoke_approval_scope, validate_approval_scope, Approval,
+        ApprovalScopeKind,
+    };
+    use descry_core::{
+        ActionClass, EvidenceRef, EvidenceSource, ScopeContract, ScopePermit, ScopePermitKind,
     };
 
     #[test]
@@ -685,5 +798,105 @@ assets:
                 .expect("behavior reads"),
             2
         );
+    }
+
+    fn scope_contract(created_at: u64, expires_at: u64) -> ScopeContract {
+        ScopeContract::signed(
+            "Fix auth session",
+            vec![EvidenceRef::new(
+                EvidenceSource::ActiveTask,
+                "task:AUTH-241",
+                "Fix auth session",
+            )],
+            vec![ScopePermit::new(
+                ScopePermitKind::Path,
+                "src/auth/**",
+                vec![ActionClass::FileWrite],
+                "active task evidence",
+            )],
+            created_at,
+            expires_at,
+            0.8,
+        )
+        .expect("scope contract signs")
+    }
+
+    #[test]
+    fn appends_and_loads_active_scope_contract() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("scope-contracts.jsonl");
+        let contract = scope_contract(100, 200);
+
+        append_scope_contract(&path, &contract).expect("contract appends");
+
+        assert_eq!(
+            active_scope_contracts(&path, 150).expect("contracts load"),
+            vec![contract.clone()]
+        );
+        assert_eq!(
+            find_active_scope_contract(&path, &contract.id, 150).expect("contract finds"),
+            Some(contract)
+        );
+    }
+
+    #[test]
+    fn active_scope_contracts_ignore_expired_malformed_and_tampered_records() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("scope-contracts.jsonl");
+        let active = scope_contract(100, 200);
+        let expired = scope_contract(100, 120);
+        let mut tampered = scope_contract(100, 200);
+        tampered.permits[0].pattern = String::from("infra/**");
+
+        append_scope_contract(&path, &active).expect("active appends");
+        append_scope_contract(&path, &expired).expect("expired appends");
+        fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .expect("cache opens")
+            .write_all(
+                format!(
+                    "{}\nnot-json\n",
+                    serde_json::to_string(&tampered).expect("tampered serializes")
+                )
+                .as_bytes(),
+            )
+            .expect("tampered writes");
+
+        let active_contracts = active_scope_contracts(&path, 150).expect("contracts load");
+
+        assert_eq!(active_contracts, vec![active]);
+        assert_eq!(
+            load_scope_contracts(&path).expect("contracts load").len(),
+            3
+        );
+    }
+
+    #[test]
+    fn rejects_append_of_tampered_scope_contract() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("scope-contracts.jsonl");
+        let mut contract = scope_contract(100, 200);
+        contract.task_summary = String::from("different task");
+
+        append_scope_contract(&path, &contract).expect_err("tampered contract rejects");
+    }
+
+    #[test]
+    fn expires_scope_contract_by_id() {
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("scope-contracts.jsonl");
+        let contract = scope_contract(100, 200);
+        let contract_id = contract.id.clone();
+        append_scope_contract(&path, &contract).expect("contract appends");
+
+        assert!(expire_scope_contract(&path, &contract_id, 150).expect("contract expires"));
+        assert!(active_scope_contracts(&path, 151)
+            .expect("contracts load")
+            .is_empty());
+        assert!(load_scope_contracts(&path)
+            .expect("contracts load")
+            .into_iter()
+            .all(|contract| contract.verify_signature()));
     }
 }

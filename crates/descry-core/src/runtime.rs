@@ -70,6 +70,18 @@ pub struct AssetMatch {
     pub default_action: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AssetGraphNode {
+    pub id: String,
+    pub asset_type: String,
+    pub sensitivity: String,
+    pub environment: String,
+    pub default_action: String,
+    pub patterns: Vec<String>,
+    pub evidence: Vec<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct DecisionInput {
     pub acp: ActionContextPacket,
@@ -77,6 +89,8 @@ pub struct DecisionInput {
     pub task: TaskEnvelope,
     pub action: ClassifiedAction,
     pub asset: Option<AssetMatch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instruction_provenance: Option<crate::InstructionProvenance>,
 }
 
 impl TaskEnvelope {

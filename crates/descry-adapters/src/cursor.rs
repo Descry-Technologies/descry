@@ -1,7 +1,9 @@
 use std::collections::BTreeSet;
 
 use descry_core::acp::{Action, Actor, Asset, BlastRadius, Context, Intent};
-use descry_core::ActionContextPacket;
+use descry_core::{ActionContextPacket, InstructionProvenance};
+
+use crate::provenance;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -55,6 +57,8 @@ pub fn normalize_before_shell_execution(input: &CursorShellHookInput) -> ActionC
         .or_else(|| string_field(&input.tool_input, "command"))
         .unwrap_or_default();
     let cwd = input.cwd.as_deref().unwrap_or("unknown");
+    let instruction_provenance: Option<InstructionProvenance> =
+        Some(provenance::classify_cursor_shell(Some(&target)));
 
     ActionContextPacket {
         actor: Actor {
@@ -93,12 +97,15 @@ pub fn normalize_before_shell_execution(input: &CursorShellHookInput) -> ActionC
             customer_impact: String::from("none"),
             financial_impact: String::from("none"),
         },
+        instruction_provenance,
     }
 }
 
 pub fn normalize_before_mcp_execution(input: &CursorMcpHookInput) -> ActionContextPacket {
     let target = mcp_target(input);
     let cwd = input.cwd.as_deref().unwrap_or("unknown");
+    let instruction_provenance: Option<InstructionProvenance> =
+        Some(provenance::classify_cursor_mcp(input.url.as_deref()));
 
     ActionContextPacket {
         actor: Actor {
@@ -137,6 +144,7 @@ pub fn normalize_before_mcp_execution(input: &CursorMcpHookInput) -> ActionConte
             customer_impact: String::from("unknown"),
             financial_impact: String::from("unknown"),
         },
+        instruction_provenance,
     }
 }
 
