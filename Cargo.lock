@@ -316,6 +316,9 @@ dependencies = [
  "descry-core",
  "descry-memory",
  "descry-policy",
+ "serde",
+ "serde_json",
+ "serde_yml",
 ]
 
 [[package]]

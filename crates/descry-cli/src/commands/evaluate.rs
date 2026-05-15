@@ -20,6 +20,7 @@ pub struct EvaluateConfig {
     pub behavior: PathBuf,
     pub audit: Option<PathBuf>,
     pub no_context: bool,
+    pub shadow: bool,
 }
 
 pub fn run(
@@ -51,6 +52,7 @@ pub fn run(
                         approvals_path: &config.approvals,
                         behavior_path: &config.behavior,
                         project_index: None,
+                        shadow: config.shadow,
                     },
                 )
             } else {
@@ -67,7 +69,7 @@ pub fn run(
                     repo_id_hash: String::from("descry-evaluate"),
                     legacy_asset_policy_path: None,
                 };
-                evaluate_action(acp, &runtime, None)
+                evaluate_action(acp, &runtime, None, config.shadow)
                     .map_err(|error| CliError::new(error, 1))?
                     .decision
             };
@@ -109,6 +111,7 @@ mod tests {
             behavior: PathBuf::from(".descry/memory/behavior.json"),
             audit: None,
             no_context: true,
+            shadow: false,
         }
     }
 

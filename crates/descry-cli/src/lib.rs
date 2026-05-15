@@ -75,6 +75,8 @@ pub enum Commands {
         audit: Option<PathBuf>,
         #[arg(long)]
         no_context: bool,
+        #[arg(long)]
+        shadow: bool,
     },
     Context {
         #[command(subcommand)]
@@ -560,6 +562,7 @@ pub fn run_with_io(
             behavior,
             audit,
             no_context,
+            shadow,
         } => commands::evaluate::run(
             stdin,
             commands::evaluate::EvaluateConfig {
@@ -573,6 +576,7 @@ pub fn run_with_io(
                 behavior,
                 audit,
                 no_context,
+                shadow,
             },
             input,
             output,

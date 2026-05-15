@@ -52,7 +52,7 @@ fn evaluate_pretooluse(acp: ActionContextPacket) -> Result<descry_core::Decision
         repo_id_hash: String::from("descry-daemon"),
         legacy_asset_policy_path: None,
     };
-    evaluate_action(acp, &config, None).map(|evaluated| evaluated.decision)
+    evaluate_action(acp, &config, None, false).map(|evaluated| evaluated.decision)
 }
 
 fn default_state_dir() -> PathBuf {

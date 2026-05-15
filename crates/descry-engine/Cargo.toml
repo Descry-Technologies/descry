@@ -16,3 +16,8 @@ descry-context = { path = "../descry-context" }
 descry-core = { path = "../descry-core" }
 descry-memory = { path = "../descry-memory" }
 descry-policy = { path = "../descry-policy" }
+
+[dev-dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yml = { workspace = true }

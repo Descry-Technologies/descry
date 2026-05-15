@@ -316,6 +316,13 @@ fn check_claude_hook(settings_path: &Path) -> DoctorCheck {
 }
 
 fn check_codex_hook(hooks_path: &Path) -> DoctorCheck {
+    if !hooks_path.exists() {
+        return DoctorCheck {
+            id: "hook.codex.pretooluse",
+            ok: true,
+            detail: String::from("codex not installed, skipping"),
+        };
+    }
     match read_json(hooks_path) {
         Ok(settings) if settings_has_codex_hook(&settings) => DoctorCheck {
             id: "hook.codex.pretooluse",
@@ -336,6 +343,13 @@ fn check_codex_hook(hooks_path: &Path) -> DoctorCheck {
 }
 
 fn check_codex_feature(config_path: &Path) -> DoctorCheck {
+    if !config_path.exists() {
+        return DoctorCheck {
+            id: "hook.codex.feature_flag",
+            ok: true,
+            detail: String::from("codex not installed, skipping"),
+        };
+    }
     match codex_hooks_feature_enabled(config_path) {
         Ok(true) => DoctorCheck {
             id: "hook.codex.feature_flag",
@@ -356,6 +370,13 @@ fn check_codex_feature(config_path: &Path) -> DoctorCheck {
 }
 
 fn check_cursor_shell_hook(hooks_path: &Path) -> DoctorCheck {
+    if !hooks_path.exists() {
+        return DoctorCheck {
+            id: "hook.cursor.before_shell_execution",
+            ok: true,
+            detail: String::from("cursor not installed, skipping"),
+        };
+    }
     match read_json(hooks_path) {
         Ok(settings) if settings_has_cursor_shell_hook(&settings) => DoctorCheck {
             id: "hook.cursor.before_shell_execution",
@@ -382,6 +403,13 @@ fn check_cursor_shell_hook(hooks_path: &Path) -> DoctorCheck {
 }
 
 fn check_cursor_mcp_hook(hooks_path: &Path) -> DoctorCheck {
+    if !hooks_path.exists() {
+        return DoctorCheck {
+            id: "hook.cursor.before_mcp_execution",
+            ok: true,
+            detail: String::from("cursor not installed, skipping"),
+        };
+    }
     match read_json(hooks_path) {
         Ok(settings) if settings_has_cursor_mcp_hook(&settings) => DoctorCheck {
             id: "hook.cursor.before_mcp_execution",

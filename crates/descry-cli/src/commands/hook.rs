@@ -519,7 +519,7 @@ fn evaluate_and_record(
         repo_id_hash: runtime.repo_id_hash.clone(),
         legacy_asset_policy_path: Some(runtime.asset_policy),
     };
-    let evaluated = evaluate_action(acp, &config, runtime.session_id.as_deref())
+    let evaluated = evaluate_action(acp, &config, runtime.session_id.as_deref(), false)
         .map_err(|error| CliError::new(error, 1))?;
     append_audit(
         &runtime.audit,

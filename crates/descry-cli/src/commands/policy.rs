@@ -44,6 +44,7 @@ pub fn run(action: PolicyAction, output: &mut dyn Write) -> Result<()> {
                         approvals_path: &approvals,
                         behavior_path: &behavior,
                         project_index: None,
+                        shadow: false,
                     },
                 )
             };
@@ -167,6 +168,7 @@ fn run_precision(
                 approvals_path,
                 behavior_path,
                 project_index: None,
+                shadow: false,
             },
         );
         let actual = verdict_name(&decision.decision);

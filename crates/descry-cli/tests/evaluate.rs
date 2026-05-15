@@ -317,6 +317,7 @@ fn evaluate_command(root: &std::path::Path) -> Commands {
         behavior: root.join(".descry/memory/behavior.json"),
         audit: None,
         no_context: false,
+        shadow: false,
     }
 }
 

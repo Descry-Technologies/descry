@@ -17,6 +17,7 @@ pub struct EvaluationRuntime<'a> {
     pub approvals_path: &'a Path,
     pub behavior_path: &'a Path,
     pub project_index: Option<&'a ProjectIndex>,
+    pub shadow: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -29,6 +30,7 @@ pub fn evaluate_action(
     acp: ActionContextPacket,
     config: &RuntimeContextConfig,
     session_id: Option<&str>,
+    shadow: bool,
 ) -> Result<EvaluatedAction, String> {
     let acp = descry_core::enrich_action_context(acp, config)
         .map_err(|error| format!("failed to enrich runtime context: {error}"))?;
@@ -47,6 +49,7 @@ pub fn evaluate_action(
         approvals_path: &config.approvals_path,
         behavior_path: &config.behavior_path,
         project_index: project_index.as_ref(),
+        shadow,
     };
     let decision = evaluate_with_legacy_asset_policy(
         decision_input.clone(),
@@ -111,11 +114,21 @@ fn evaluate_targets(
     runtime: EvaluationRuntime<'_>,
     legacy_asset_policy_path: Option<&Path>,
 ) -> DecisionOutput {
-    expand_target_stage(&input.acp)
+    let result = expand_target_stage(&input.acp)
         .into_iter()
         .map(|target| evaluate_target_stage(&input, target, &runtime, legacy_asset_policy_path))
         .reduce(strongest_verdict_stage)
-        .expect("action targets are never empty")
+        .expect("action targets are never empty");
+
+    if runtime.shadow && result.decision == Decision::Block {
+        DecisionOutput {
+            decision: Decision::AllowWithLog,
+            reason: format!("[shadow] {}", result.reason),
+            ..result
+        }
+    } else {
+        result
+    }
 }
 
 pub fn build_decision_input(acp: ActionContextPacket) -> DecisionInput {
@@ -1833,6 +1846,7 @@ hard_blocks: []
                 approvals_path,
                 behavior_path: &temp_path("behavior.json"),
                 project_index: None,
+                shadow: false,
             },
         )
     }
@@ -1850,6 +1864,7 @@ hard_blocks: []
                 approvals_path: &temp_path("approvals.jsonl"),
                 behavior_path: &temp_path("behavior.json"),
                 project_index: None,
+                shadow: false,
             },
             Some(legacy_asset_policy_path),
         )
@@ -1870,6 +1885,7 @@ hard_blocks: []
                 approvals_path,
                 behavior_path,
                 project_index: None,
+                shadow: false,
             },
         )
     }
@@ -2642,6 +2658,10 @@ actions:
         let p95 = durations[p95_idx.min(durations.len() - 1)];
 
         let limit_p95 = std::time::Duration::from_millis(50);
+        // Debug builds are ~3–5× slower; 25ms still catches 5× regressions in release.
+        #[cfg(debug_assertions)]
+        let limit_p50 = std::time::Duration::from_millis(25);
+        #[cfg(not(debug_assertions))]
         let limit_p50 = std::time::Duration::from_millis(10);
 
         assert!(

@@ -33,6 +33,11 @@ agents/
 agents/codex-runs/
 agents/tests/
 
+# Internal strategy and planning docs (not for public repo)
+docs/v1/
+docs/V1_*.md
+docs/V2_*.md
+
 # Codex CLI session markers
 .codex
 .codex/

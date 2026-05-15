@@ -54,6 +54,7 @@ fn run_trace(trace: DemoTrace, json_output: bool, output: &mut dyn Write) -> Res
             approvals_path: &approvals_path,
             behavior_path: &behavior_path,
             project_index: None,
+            shadow: false,
         },
     );
     let policy_source = loaded_policy.source.detail();
