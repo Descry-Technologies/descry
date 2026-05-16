@@ -396,10 +396,9 @@ fn classify_shell(target: &str) -> ActionClass {
         return ActionClass::Deploy;
     }
 
-    if command_starts_with(&lowercase_tokens, &["git", "status"])
-        || command_starts_with(&lowercase_tokens, &["git", "diff"])
-        || command_starts_with(&lowercase_tokens, &["git", "log"])
-    {
+    if lowercase_tokens.first().map(String::as_str) == Some("git") {
+        // Any git subcommand not already classified as GitRewrite above is a read or
+        // non-destructive operation (clone, fetch, pull, status, diff, log, show, …).
         ActionClass::GitRead
     } else if command_starts_with(&lowercase_tokens, &["cargo", "test"])
         || command_starts_with(&lowercase_tokens, &["npm", "test"])
@@ -1722,6 +1721,23 @@ mod tests {
         let action = classify_action(&acp("shell.exec", "git push origin main --force"));
 
         assert_eq!(action.class, ActionClass::GitRewrite);
+    }
+
+    #[test]
+    fn classifies_git_clone_fetch_pull_as_git_read() {
+        let cases = [
+            "git clone https://github.com/owner/repo.git /tmp/repo",
+            "git clone git@github.com:owner/repo.git",
+            "git fetch origin",
+            "git fetch --all",
+            "git pull origin main",
+            "git pull",
+        ];
+
+        for target in cases {
+            let action = classify_action(&acp("shell.exec", target));
+            assert_eq!(action.class, ActionClass::GitRead, "{target}");
+        }
     }
 
     #[test]
