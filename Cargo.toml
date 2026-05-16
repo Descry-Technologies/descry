@@ -17,7 +17,7 @@ resolver = "2"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-repository = "https://github.com/descry-dev/descry"
+repository = "https://github.com/Descry-Technologies/descry"
 homepage = "https://descry.app"
 rust-version = "1.75"
 

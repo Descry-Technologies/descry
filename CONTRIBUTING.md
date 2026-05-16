@@ -15,7 +15,7 @@ Descry Guard is in alpha. The best contributions are small, testable changes tha
 ## Development Setup
 
 ```bash
-git clone https://github.com/descry-dev/descry.git
+git clone https://github.com/Descry-Technologies/descry.git
 cd descry
 cargo test --workspace
 ```
