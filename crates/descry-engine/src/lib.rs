@@ -68,8 +68,7 @@ pub fn evaluate_action(
     })
 }
 
-const BUILT_IN_SAFE_DEFAULTS: &str =
-    include_str!("../../../policies/safe-defaults.yml");
+const BUILT_IN_SAFE_DEFAULTS: &str = include_str!("../../../policies/safe-defaults.yml");
 const DEFAULT_POLICY_PATH: &str = "policies/safe-defaults.yml";
 
 fn load_policy(path: &Path) -> Result<Policy, String> {
@@ -77,16 +76,14 @@ fn load_policy(path: &Path) -> Result<Policy, String> {
         Ok(body) => {
             Policy::load_yaml(&body).map_err(|error| format!("failed to load policy: {error}"))
         }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound
-            && path == Path::new(DEFAULT_POLICY_PATH) =>
+        Err(error)
+            if error.kind() == std::io::ErrorKind::NotFound
+                && path == Path::new(DEFAULT_POLICY_PATH) =>
         {
             Policy::load_yaml(BUILT_IN_SAFE_DEFAULTS)
                 .map_err(|error| format!("failed to load built-in policy: {error}"))
         }
-        Err(error) => Err(format!(
-            "failed to read policy {}: {error}",
-            path.display()
-        )),
+        Err(error) => Err(format!("failed to read policy {}: {error}", path.display())),
     }
 }
 
