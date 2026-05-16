@@ -33,19 +33,30 @@ impl AuditChain {
             .append(true)
             .open(&path)?;
         let mut head = None;
+        let lines: Vec<_> = BufReader::new(file).lines().collect();
+        let total = lines.len();
 
-        for (index, line) in BufReader::new(file).lines().enumerate() {
+        for (index, line) in lines.into_iter().enumerate() {
             let line_number = index as u64 + 1;
             let line = line?;
-            if line.is_empty() {
+            let trimmed = line.trim_matches('\0').trim();
+            if trimmed.is_empty() || !trimmed.starts_with('{') {
                 continue;
             }
-            let event: AuditEvent =
-                serde_json::from_str(&line).map_err(|error| AuditError::MalformedRecord {
-                    line: line_number,
-                    reason: error.to_string(),
-                })?;
-            head = Some(event);
+            match serde_json::from_str::<AuditEvent>(trimmed) {
+                Ok(event) => head = Some(event),
+                Err(error) => {
+                    // Tolerate a truncated last line — a concurrent writer may
+                    // not have finished flushing. Fail hard on interior corruption.
+                    let is_last = line_number == total as u64;
+                    if !is_last {
+                        return Err(AuditError::MalformedRecord {
+                            line: line_number,
+                            reason: error.to_string(),
+                        });
+                    }
+                }
+            }
         }
 
         let next_seq = head.as_ref().map_or(1, |event| event.seq + 1);

@@ -585,7 +585,11 @@ fn append_audit(
     session_id: Option<&str>,
 ) -> Result<()> {
     let acp = &decision_input.acp;
-    let mut chain = AuditChain::open_verified(audit_path, repo_id_hash)
+    // Use open (not open_verified) in the hot path: verifying the full chain
+    // on every hook call is O(n) and creates a race window when concurrent
+    // hook invocations run simultaneously. Verification is reserved for
+    // `descry doctor` and `descry logs verify`.
+    let mut chain = AuditChain::open(audit_path, repo_id_hash)
         .map_err(|audit_error| CliError::new(audit_error.to_string(), 1))?;
     let timestamp = OffsetDateTime::now_utc()
         .format(&Rfc3339)
