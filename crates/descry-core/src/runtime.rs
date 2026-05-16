@@ -48,46 +48,57 @@ pub fn classify_drift_signal(
         return DriftSignal::None;
     }
 
-    let destructive = matches!(
-        action_class,
-        ActionClass::ShellDelete
-            | ActionClass::CloudDelete
-            | ActionClass::DatabaseDestroy
-            | ActionClass::McpDestroy
-            | ActionClass::GitRewrite
-    );
+    // Engine classification overrides the adapter's conservative blast_radius default.
+    // Known-safe classes are treated as reversible regardless of what the adapter reported.
+    let effective_reversible = blast_radius_reversible || is_inherently_reversible_class(action_class);
+
+    let destructive = is_destructive_class(action_class);
 
     let production_sensitive = asset_sensitivity
         .map(|s| matches!(s, "critical" | "high"))
         .unwrap_or(false);
 
-    if destructive && (!blast_radius_reversible || production_sensitive) {
+    if destructive && (!effective_reversible || production_sensitive) {
         return DriftSignal::HighConfidence;
     }
 
     // Irreversible action with unrecognized class from external provenance — the classifier
     // couldn't name it, but the blast-radius flag makes the intent explicit.
-    if !blast_radius_reversible && matches!(action_class, ActionClass::Unknown) {
+    if !effective_reversible && matches!(action_class, ActionClass::Unknown) {
         return DriftSignal::HighConfidence;
     }
 
-    if task_confidence < 0.5 && destructive {
-        return DriftSignal::Suspicious;
-    }
-
-    if external_provenance
-        && matches!(
-            action_class,
-            ActionClass::ShellDelete
-                | ActionClass::CloudDelete
-                | ActionClass::DatabaseDestroy
-                | ActionClass::McpDestroy
-        )
-    {
+    // Destructive but reversible/not-production: still worth flagging.
+    if destructive {
         return DriftSignal::Suspicious;
     }
 
     DriftSignal::None
+}
+
+fn is_destructive_class(class: &ActionClass) -> bool {
+    matches!(
+        class,
+        ActionClass::ShellDelete
+            | ActionClass::CloudDelete
+            | ActionClass::DatabaseDestroy
+            | ActionClass::McpDestroy
+            | ActionClass::GitRewrite
+    )
+}
+
+fn is_inherently_reversible_class(class: &ActionClass) -> bool {
+    matches!(
+        class,
+        ActionClass::GitRead
+            | ActionClass::FileRead
+            | ActionClass::ShellRead
+            | ActionClass::ShellTest
+            | ActionClass::ShellBuild
+            | ActionClass::ShellInstall
+            | ActionClass::McpRead
+            | ActionClass::SecretRead
+    )
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -95,6 +106,7 @@ pub fn classify_drift_signal(
 pub enum ActionClass {
     FileRead,
     FileWrite,
+    ShellRead,
     ShellTest,
     ShellBuild,
     ShellInstall,
