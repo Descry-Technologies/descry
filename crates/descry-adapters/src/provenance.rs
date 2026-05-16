@@ -5,7 +5,11 @@ use serde_json::Value;
 ///
 /// Returns `AgentReasoning` when the signal is ambiguous. Never returns `User`
 /// because the hook payload does not carry conversation-turn provenance.
-pub fn classify_claude(tool_name: &str, tool_input: &Value, cwd: Option<&str>) -> InstructionProvenance {
+pub fn classify_claude(
+    tool_name: &str,
+    tool_input: &Value,
+    cwd: Option<&str>,
+) -> InstructionProvenance {
     if tool_name.starts_with("mcp__") {
         return InstructionProvenance::ToolOutput;
     }
@@ -26,7 +30,11 @@ pub fn classify_claude(tool_name: &str, tool_input: &Value, cwd: Option<&str>) -
 }
 
 /// Classify provenance for a Codex CLI hook.
-pub fn classify_codex(tool_name: &str, tool_input: &Value, cwd: Option<&str>) -> InstructionProvenance {
+pub fn classify_codex(
+    tool_name: &str,
+    tool_input: &Value,
+    cwd: Option<&str>,
+) -> InstructionProvenance {
     if tool_name.starts_with("mcp__") {
         return InstructionProvenance::ToolOutput;
     }
@@ -83,12 +91,10 @@ fn file_path_provenance(
     }
 
     let file_path = match tool_name {
-        "Read" | "Write" | "Edit" | "MultiEdit" | "read_file" | "write_file" => {
-            tool_input
-                .get("file_path")
-                .or_else(|| tool_input.get("path"))
-                .and_then(Value::as_str)?
-        }
+        "Read" | "Write" | "Edit" | "MultiEdit" | "read_file" | "write_file" => tool_input
+            .get("file_path")
+            .or_else(|| tool_input.get("path"))
+            .and_then(Value::as_str)?,
         _ => return None,
     };
 
@@ -156,21 +162,14 @@ mod tests {
 
     #[test]
     fn file_read_outside_cwd_yields_repo_content() {
-        let provenance = classify_claude(
-            "Read",
-            &json!({"file_path": "/etc/passwd"}),
-            Some("/repo"),
-        );
+        let provenance =
+            classify_claude("Read", &json!({"file_path": "/etc/passwd"}), Some("/repo"));
         assert_eq!(provenance, InstructionProvenance::RepoContent);
     }
 
     #[test]
     fn unknown_tool_yields_agent_reasoning() {
-        let provenance = classify_claude(
-            "SomeFutureTool",
-            &json!({}),
-            Some("/repo"),
-        );
+        let provenance = classify_claude("SomeFutureTool", &json!({}), Some("/repo"));
         assert_eq!(provenance, InstructionProvenance::AgentReasoning);
     }
 
@@ -178,7 +177,11 @@ mod tests {
     fn classifier_never_emits_user_variant() {
         let inputs = [
             ("Bash", json!({"command": "echo hi"}), Some("/repo")),
-            ("Read", json!({"file_path": "/repo/src/lib.rs"}), Some("/repo")),
+            (
+                "Read",
+                json!({"file_path": "/repo/src/lib.rs"}),
+                Some("/repo"),
+            ),
             ("mcp__svc__call", json!({}), Some("/repo")),
             ("Bash", json!({"command": "curl https://x.com"}), None),
         ];
@@ -194,11 +197,7 @@ mod tests {
 
     #[test]
     fn codex_mcp_yields_tool_output() {
-        let provenance = classify_codex(
-            "mcp__svc__list",
-            &json!({}),
-            Some("/repo"),
-        );
+        let provenance = classify_codex("mcp__svc__list", &json!({}), Some("/repo"));
         assert_eq!(provenance, InstructionProvenance::ToolOutput);
     }
 

@@ -65,8 +65,7 @@ fn corpus_precision() {
     let manifest_path = root.join("fixtures/manifest.yml");
     let manifest_body =
         std::fs::read_to_string(&manifest_path).expect("fixtures/manifest.yml readable");
-    let entries: Vec<ManifestEntry> =
-        serde_yml::from_str(&manifest_body).expect("manifest parses");
+    let entries: Vec<ManifestEntry> = serde_yml::from_str(&manifest_body).expect("manifest parses");
 
     let policy = load_policy();
     let gate: f64 = std::env::var("DESCRY_PRECISION_GATE")

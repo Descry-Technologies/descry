@@ -37,8 +37,7 @@ pub struct ExportBundle {
 /// Pads to the next power of two with the last hash repeated.
 pub fn compute_merkle_root(hashes: &[&str]) -> String {
     if hashes.is_empty() {
-        return "0000000000000000000000000000000000000000000000000000000000000000"
-            .to_string();
+        return "0000000000000000000000000000000000000000000000000000000000000000".to_string();
     }
     if hashes.len() == 1 {
         return hashes[0].to_string();
@@ -136,7 +135,9 @@ pub(crate) fn read_all_events(path: &Path) -> Result<Vec<AuditEvent>, AuditError
 
 #[cfg(test)]
 mod tests {
-    use super::{build_checkpoints, checkpoints_from_events, compute_merkle_root, CHECKPOINT_INTERVAL};
+    use super::{
+        build_checkpoints, checkpoints_from_events, compute_merkle_root, CHECKPOINT_INTERVAL,
+    };
     use crate::AuditChain;
 
     #[test]

@@ -31,10 +31,10 @@ fn run(args: &[String]) -> Result<i32, String> {
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "--chain" => {
-                chain_path = Some(PathBuf::from(
-                    iter.next()
-                        .ok_or_else(|| String::from("--chain requires a path argument"))?,
-                ));
+                chain_path =
+                    Some(PathBuf::from(iter.next().ok_or_else(|| {
+                        String::from("--chain requires a path argument")
+                    })?));
             }
             "--repo-id" => {
                 repo_id = iter
@@ -68,8 +68,8 @@ fn run(args: &[String]) -> Result<i32, String> {
     }
 
     if do_export {
-        let bundle = export_bundle(&chain_path, &repo_id)
-            .map_err(|e| format!("export failed: {e}"))?;
+        let bundle =
+            export_bundle(&chain_path, &repo_id).map_err(|e| format!("export failed: {e}"))?;
         println!(
             "{}",
             serde_json::to_string_pretty(&bundle)

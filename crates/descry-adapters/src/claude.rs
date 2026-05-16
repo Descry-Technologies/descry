@@ -39,8 +39,11 @@ pub fn normalize_pretooluse(input: &ClaudeHookInput) -> ActionContextPacket {
     let action_type = action_type_for_tool(&input.tool_name);
     let verb = verb_for_action_type(action_type);
     let cwd = input.cwd.as_deref().unwrap_or("unknown");
-    let instruction_provenance: Option<InstructionProvenance> =
-        Some(provenance::classify_claude(&input.tool_name, &input.tool_input, input.cwd.as_deref()));
+    let instruction_provenance: Option<InstructionProvenance> = Some(provenance::classify_claude(
+        &input.tool_name,
+        &input.tool_input,
+        input.cwd.as_deref(),
+    ));
 
     ActionContextPacket {
         actor: Actor {

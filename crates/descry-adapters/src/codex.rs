@@ -25,8 +25,11 @@ pub fn normalize_pretooluse(input: &CodexHookInput) -> ActionContextPacket {
     let target = target_for_tool(input);
     let targets = targets_for_tool(input, &target);
     let cwd = input.cwd.as_deref().unwrap_or("unknown");
-    let instruction_provenance: Option<InstructionProvenance> =
-        Some(provenance::classify_codex(&input.tool_name, &input.tool_input, input.cwd.as_deref()));
+    let instruction_provenance: Option<InstructionProvenance> = Some(provenance::classify_codex(
+        &input.tool_name,
+        &input.tool_input,
+        input.cwd.as_deref(),
+    ));
 
     ActionContextPacket {
         actor: Actor {

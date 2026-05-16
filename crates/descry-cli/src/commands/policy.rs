@@ -115,9 +115,8 @@ fn run_precision(
             2,
         )
     })?;
-    let entries: Vec<ManifestEntry> = serde_yml::from_str(&manifest_body).map_err(|e| {
-        CliError::new(format!("failed to parse manifest: {e}"), 2)
-    })?;
+    let entries: Vec<ManifestEntry> = serde_yml::from_str(&manifest_body)
+        .map_err(|e| CliError::new(format!("failed to parse manifest: {e}"), 2))?;
 
     let loaded_policy = load_policy(policy_path)?;
     let project_config = load_project_policy(project_path)?;

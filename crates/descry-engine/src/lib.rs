@@ -2,13 +2,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use descry_context::ProjectIndex;
 use descry_core::{
     classify_drift_signal, ActionClass, ActionContextPacket, AssetMatch, ClassifiedAction,
     Confidence, Decision, DecisionInput, DecisionOutput, DriftSignal, RiskScore,
     RuntimeContextConfig, ScopeContract, ScopePermitKind, TaskEnvelope, TaskEnvelopeBuilder,
     TaskSource,
 };
-use descry_context::ProjectIndex;
 use descry_policy::{Policy, ProjectPolicy};
 
 pub struct EvaluationRuntime<'a> {
@@ -182,15 +182,12 @@ fn match_project_index_asset(
     let index = project_index?;
     let lowercase_target = target.to_ascii_lowercase();
     for node in &index.asset_graph {
-        let matched = node
-            .patterns
-            .iter()
-            .any(|pattern| {
-                let pat = pattern.to_ascii_lowercase();
-                lowercase_target == pat
-                    || lowercase_target.ends_with(&format!("/{pat}"))
-                    || lowercase_target.ends_with(&format!("\\{pat}"))
-            });
+        let matched = node.patterns.iter().any(|pattern| {
+            let pat = pattern.to_ascii_lowercase();
+            lowercase_target == pat
+                || lowercase_target.ends_with(&format!("/{pat}"))
+                || lowercase_target.ends_with(&format!("\\{pat}"))
+        });
         if matched {
             return Some(AssetMatch {
                 id: node.id.clone(),
@@ -1617,7 +1614,9 @@ fn hosted_control_plane_provider(target: &str) -> Option<&'static str> {
 
 fn production_api_provider_from_url(target: &str) -> Option<&'static str> {
     let url_start = target.find("https://").or_else(|| target.find("http://"))?;
-    let after_scheme = target[url_start..].trim_start_matches("https://").trim_start_matches("http://");
+    let after_scheme = target[url_start..]
+        .trim_start_matches("https://")
+        .trim_start_matches("http://");
     let host_end = after_scheme
         .find(['/', ':', ' '])
         .unwrap_or(after_scheme.len());

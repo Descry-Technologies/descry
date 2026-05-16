@@ -194,13 +194,18 @@ fn evaluate_stdin_blocks_p3_hijack_prod_delete_with_provenance_trail() {
     let cli = Cli {
         command: evaluate_command(tempdir.path()),
     };
-    let mut input = include_str!("../../../fixtures/p3-prod-delete-after-token-read.json").as_bytes();
+    let mut input =
+        include_str!("../../../fixtures/p3-prod-delete-after-token-read.json").as_bytes();
     let mut output = Vec::new();
     let mut error = Vec::new();
 
     run_with_io(cli, &mut input, &mut output, &mut error).expect("evaluate succeeds");
 
-    assert!(error.is_empty(), "stderr: {}", String::from_utf8_lossy(&error));
+    assert!(
+        error.is_empty(),
+        "stderr: {}",
+        String::from_utf8_lossy(&error)
+    );
     let json: Value = serde_json::from_slice(&output).expect("stdout is json");
     assert_eq!(
         json["decision"], "block",

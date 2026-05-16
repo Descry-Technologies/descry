@@ -103,7 +103,10 @@ pub async fn approve(body: Bytes) -> Response {
     let req: ApproveRequest = match serde_json::from_slice(&body) {
         Ok(r) => r,
         Err(e) => {
-            return (StatusCode::BAD_REQUEST, Json(json!({ "error": e.to_string() })))
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": e.to_string() })),
+            )
                 .into_response();
         }
     };
