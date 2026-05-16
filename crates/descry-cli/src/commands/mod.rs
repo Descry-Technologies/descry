@@ -12,4 +12,6 @@ pub mod policy;
 pub mod policy_source;
 pub mod scan;
 pub mod scope;
+pub mod setup;
+pub mod status;
 pub mod task;

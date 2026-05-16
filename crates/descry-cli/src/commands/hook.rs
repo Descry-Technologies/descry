@@ -330,6 +330,8 @@ fn run_claude(
             let hook_input: ClaudeHookInput = serde_json::from_slice(&body)
                 .map_err(|parse_error| parse_hook_error(error, parse_error))?;
             let acp = normalize_claude_pretooluse(&hook_input);
+            let acp_target = acp.action.target.clone();
+            let acp_action_type = acp.action.action_type.clone();
             let decision = evaluate_and_record(
                 acp,
                 HookRuntimeConfig {
@@ -349,6 +351,7 @@ fn run_claude(
             let hook_output = claude_output(permission_decision, host_reason(&decision));
             serde_json::to_writer(output, &hook_output)
                 .map_err(|serialize_error| CliError::new(serialize_error.to_string(), 1))?;
+            write_block_stderr(error, &decision, &acp_target, &acp_action_type);
             Ok(())
         }
     }
@@ -376,6 +379,8 @@ fn run_codex(
             let hook_input: CodexHookInput = serde_json::from_slice(&body)
                 .map_err(|parse_error| parse_hook_error(error, parse_error))?;
             let acp = normalize_codex_pretooluse(&hook_input);
+            let acp_target = acp.action.target.clone();
+            let acp_action_type = acp.action.action_type.clone();
             let decision = evaluate_and_record(
                 acp,
                 HookRuntimeConfig {
@@ -395,6 +400,7 @@ fn run_codex(
             let hook_output = claude_output(permission_decision, host_reason(&decision));
             serde_json::to_writer(output, &hook_output)
                 .map_err(|serialize_error| CliError::new(serialize_error.to_string(), 1))?;
+            write_block_stderr(error, &decision, &acp_target, &acp_action_type);
             Ok(())
         }
     }
@@ -422,6 +428,8 @@ fn run_cursor(
             let hook_input: CursorShellHookInput = serde_json::from_slice(&body)
                 .map_err(|parse_error| parse_hook_error(error, parse_error))?;
             let acp = normalize_before_shell_execution(&hook_input);
+            let acp_target = acp.action.target.clone();
+            let acp_action_type = acp.action.action_type.clone();
             let decision = evaluate_and_record(
                 acp,
                 HookRuntimeConfig {
@@ -441,6 +449,7 @@ fn run_cursor(
             let hook_output = cursor_output(cursor_decision, host_reason(&decision));
             serde_json::to_writer(output, &hook_output)
                 .map_err(|serialize_error| CliError::new(serialize_error.to_string(), 1))?;
+            write_block_stderr(error, &decision, &acp_target, &acp_action_type);
             Ok(())
         }
         CursorHookAction::BeforeMcpExecution {
@@ -458,6 +467,8 @@ fn run_cursor(
             let hook_input: CursorMcpHookInput = serde_json::from_slice(&body)
                 .map_err(|parse_error| parse_hook_error(error, parse_error))?;
             let acp = normalize_before_mcp_execution(&hook_input);
+            let acp_target_mcp = acp.action.target.clone();
+            let acp_action_type_mcp = acp.action.action_type.clone();
             let decision = evaluate_and_record(
                 acp,
                 HookRuntimeConfig {
@@ -477,6 +488,7 @@ fn run_cursor(
             let hook_output = cursor_output(cursor_decision, host_reason(&decision));
             serde_json::to_writer(output, &hook_output)
                 .map_err(|serialize_error| CliError::new(serialize_error.to_string(), 1))?;
+            write_block_stderr(error, &decision, &acp_target_mcp, &acp_action_type_mcp);
             Ok(())
         }
     }
@@ -499,6 +511,32 @@ fn host_reason(decision: &DecisionOutput) -> String {
     } else {
         format!("{} {}", decision.reason, decision.conditions.join(" "))
     }
+}
+
+fn write_block_stderr(
+    error: &mut dyn Write,
+    decision: &DecisionOutput,
+    target: &str,
+    action_class: &str,
+) {
+    use descry_core::Decision;
+    let header = match decision.decision {
+        Decision::Block => "Descry: action blocked",
+        Decision::RequireApproval => "Descry: action requires approval",
+        _ => return,
+    };
+    let _ = writeln!(error, "\n{header}");
+    let _ = writeln!(error, "  Action:  {target}");
+    let _ = writeln!(error, "  Reason:  {}", host_reason(decision));
+    let _ = writeln!(error);
+    let _ = writeln!(error, "  To allow temporarily:");
+    let _ = writeln!(
+        error,
+        "    descry approve --scope \"action:{action_class}\" --ttl 30m"
+    );
+    let _ = writeln!(error, "  To see recent decisions:");
+    let _ = writeln!(error, "    descry logs tail");
+    let _ = writeln!(error);
 }
 
 fn evaluate_and_record(

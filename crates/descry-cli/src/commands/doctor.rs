@@ -31,6 +31,7 @@ pub struct DoctorConfig {
     pub policy: PathBuf,
     pub audit: PathBuf,
     pub repo_id_hash: String,
+    pub json: bool,
 }
 
 pub fn run(config: DoctorConfig, output: &mut dyn Write) -> Result<()> {
@@ -108,31 +109,99 @@ pub fn run(config: DoctorConfig, output: &mut dyn Write) -> Result<()> {
         checks.extend(check_launch_demos(&config.policy));
     }
     let ok = checks.iter().all(|check| check.ok);
-    let checks_json: Vec<Value> = checks
-        .into_iter()
-        .map(|check| {
-            json!({
-                "id": check.id,
-                "ok": check.ok,
-                "detail": check.detail
-            })
-        })
-        .collect();
 
-    writeln!(
-        output,
-        "{}",
-        json!({
-            "ok": ok,
-            "checks": checks_json
-        })
-    )?;
+    if config.json {
+        let checks_json: Vec<Value> = checks
+            .into_iter()
+            .map(|check| {
+                json!({
+                    "id": check.id,
+                    "ok": check.ok,
+                    "detail": check.detail
+                })
+            })
+            .collect();
+
+        writeln!(
+            output,
+            "{}",
+            json!({
+                "ok": ok,
+                "checks": checks_json
+            })
+        )?;
+    } else {
+        write_human_output(&checks, ok, output)?;
+    }
 
     if ok {
         Ok(())
     } else {
         Err(CliError::new("", 1))
     }
+}
+
+fn check_label(id: &str) -> Option<&'static str> {
+    match id {
+        "project.config" => Some("Project policy"),
+        "project.index" => Some("Project index"),
+        "policy.safe_defaults" => Some("Safety policy"),
+        "hook.claude.pretooluse" => Some("Claude Code hook"),
+        "hook.codex.pretooluse" => Some("Codex hook"),
+        "hook.codex.feature_flag" => Some("Codex feature"),
+        "hook.cursor.before_shell_execution" => Some("Cursor shell hook"),
+        "hook.cursor.before_mcp_execution" => Some("Cursor MCP hook"),
+        "hook.git.pre_push" => Some("Git pre-push hook"),
+        "audit.verify" => Some("Audit log"),
+        _ => None,
+    }
+}
+
+fn write_human_output(checks: &[DoctorCheck], ok: bool, output: &mut dyn Write) -> Result<()> {
+    writeln!(output)?;
+
+    // Separate demo checks from the rest
+    let demo_checks: Vec<&DoctorCheck> = checks
+        .iter()
+        .filter(|c| c.id.starts_with("demo."))
+        .collect();
+    let regular_checks: Vec<&DoctorCheck> = checks
+        .iter()
+        .filter(|c| !c.id.starts_with("demo.") && !c.id.starts_with("repair."))
+        .collect();
+
+    for check in &regular_checks {
+        if let Some(label) = check_label(check.id) {
+            let icon = if check.ok { '✓' } else { '✗' };
+            writeln!(output, "  {:<22}  {}  {}", label, icon, check.detail)?;
+        }
+    }
+
+    // Collapse demo checks into one line
+    if !demo_checks.is_empty() {
+        let total = demo_checks.len();
+        let passing = demo_checks.iter().filter(|c| c.ok).count();
+        let demo_ok = passing == total;
+        let icon = if demo_ok { '✓' } else { '✗' };
+        writeln!(
+            output,
+            "  {:<22}  {}  {}/{} passing",
+            "Demos", icon, passing, total
+        )?;
+    }
+
+    writeln!(output)?;
+
+    if ok {
+        writeln!(output, "All checks passed. Your agents are protected.")?;
+    } else {
+        writeln!(
+            output,
+            "Some checks failed. Run  descry doctor --fix  to repair."
+        )?;
+    }
+
+    Ok(())
 }
 
 fn apply_fixes(config: &DoctorConfig) -> Vec<DoctorCheck> {
@@ -148,6 +217,7 @@ fn apply_fixes(config: &DoctorConfig) -> Vec<DoctorCheck> {
                         project: project.clone(),
                         dry_run: false,
                         install_hooks: false,
+                        json: true,
                     },
                     &mut sink,
                 ),
@@ -271,10 +341,10 @@ fn check_project_index(index_path: &Path) -> DoctorCheck {
     }
 }
 
-struct DoctorCheck {
-    id: &'static str,
-    ok: bool,
-    detail: String,
+pub(crate) struct DoctorCheck {
+    pub(crate) id: &'static str,
+    pub(crate) ok: bool,
+    pub(crate) detail: String,
 }
 
 fn check_policy(policy_path: &Path) -> DoctorCheck {

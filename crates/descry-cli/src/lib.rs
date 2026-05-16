@@ -89,6 +89,22 @@ pub enum Commands {
         dry_run: bool,
         #[arg(long)]
         all: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// One-shot setup: initialize project + install hooks. Best starting point.
+    Setup {
+        #[arg(long, default_value = ".")]
+        project: PathBuf,
+    },
+    /// Show protection status and recent decisions.
+    Status {
+        #[arg(long, default_value = ".descry/audit.log")]
+        audit: PathBuf,
+        #[arg(long, default_value = ".descry/context.md")]
+        context: PathBuf,
+        #[arg(short = 'n', long, default_value_t = 5usize)]
+        recent: usize,
     },
     Daemon {
         #[command(subcommand)]
@@ -153,6 +169,8 @@ pub enum Commands {
         audit: PathBuf,
         #[arg(long, default_value = "descry-default-repo")]
         repo_id_hash: String,
+        #[arg(long)]
+        json: bool,
     },
     Hook {
         #[command(subcommand)]
@@ -587,14 +605,22 @@ pub fn run_with_io(
             project,
             dry_run,
             all,
+            json,
         } => commands::init::run(
             commands::init::InitConfig {
                 project,
                 dry_run,
                 install_hooks: all,
+                json,
             },
             output,
         ),
+        Commands::Setup { project } => commands::setup::run(project, output),
+        Commands::Status {
+            audit,
+            context,
+            recent,
+        } => commands::status::run(audit, context, recent, output),
         Commands::Daemon { action } => commands::daemon::run(action),
         Commands::Policy { action } => commands::policy::run(action, output),
         Commands::Scope { action } => commands::scope::run(action, output),
@@ -619,6 +645,7 @@ pub fn run_with_io(
             policy,
             audit,
             repo_id_hash,
+            json,
         } => commands::doctor::run(
             commands::doctor::DoctorConfig {
                 project,
@@ -631,6 +658,7 @@ pub fn run_with_io(
                 policy,
                 audit,
                 repo_id_hash,
+                json,
             },
             output,
         ),
