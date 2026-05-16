@@ -6,12 +6,9 @@ All notable user-facing changes are documented here. Format follows [Keep a Chan
 
 ## [Unreleased]
 
-### Changed
-- `descry doctor`: Codex and Cursor hook checks now return `ok: true` (skipped) when those tools are not installed, rather than failing on missing config files. If the tool IS installed but the hook is not configured, the check still fails as expected.
-
 ---
 
-## [0.1.0] — Pending tag
+## [0.1.0] — 2026-05-16
 
 First public release of the Descry action firewall.
 
@@ -125,3 +122,8 @@ First public release of the Descry action firewall.
 - Release artifact packaging: `scripts/package.sh`
 - Homebrew formula generation: `scripts/homebrew_formula.sh`
 - Source installer: `scripts/install.sh`
+
+### Fixed
+
+- `descry doctor`: Codex and Cursor hook checks now return `ok: true` (skipped) when those tools are not installed, rather than failing on missing config files. If the tool IS installed but the hook is not configured, the check still fails as expected.
+- Audit chain: serialize record to a complete buffer before `write_all` so concurrent hook calls cannot interleave bytes in the JSONL log.
