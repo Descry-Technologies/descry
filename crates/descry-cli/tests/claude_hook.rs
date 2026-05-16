@@ -16,7 +16,7 @@ fn claude_pretooluse_blocks_rm_rf_home_and_writes_audit() {
     let result = run_with_io(cli(&audit), &mut input, &mut output, &mut error);
 
     result.expect("hook succeeds");
-    assert!(error.is_empty());
+    assert!(String::from_utf8_lossy(&error).contains("Descry:"));
     let output_json: Value = serde_json::from_slice(&output).expect("stdout is json");
     assert_eq!(
         output_json["hookSpecificOutput"]["permissionDecision"],
@@ -90,7 +90,10 @@ fn claude_pretooluse_requires_approval_for_sensitive_off_task_write() {
     )
     .expect("hook succeeds");
 
-    assert!(error.is_empty());
+    assert!(
+        !error.is_empty(),
+        "non-allow decision should write to stderr"
+    );
     let output_json: Value = serde_json::from_slice(&output).expect("stdout is json");
     assert_eq!(
         output_json["hookSpecificOutput"]["permissionDecision"],
@@ -175,7 +178,10 @@ fn claude_pretooluse_raises_repeat_sensitive_write_reason() {
             &mut error,
         )
         .expect("hook succeeds");
-        assert!(error.is_empty());
+        assert!(
+            !error.is_empty(),
+            "non-allow decision should write to stderr"
+        );
         if attempt == 2 {
             second_output = output;
         }
@@ -235,7 +241,10 @@ assets:
     )
     .expect("hook succeeds");
 
-    assert!(error.is_empty());
+    assert!(
+        !error.is_empty(),
+        "non-allow decision should write to stderr"
+    );
     let output_json: Value = serde_json::from_slice(&output).expect("stdout is json");
     assert_eq!(
         output_json["hookSpecificOutput"]["permissionDecision"],
@@ -271,7 +280,10 @@ fn claude_pretooluse_uses_project_defaults_for_secret_write() {
     )
     .expect("hook succeeds");
 
-    assert!(error.is_empty());
+    assert!(
+        !error.is_empty(),
+        "non-allow decision should write to stderr"
+    );
     let output_json: Value = serde_json::from_slice(&output).expect("stdout is json");
     assert_eq!(
         output_json["hookSpecificOutput"]["permissionDecision"],
@@ -295,7 +307,10 @@ fn claude_pretooluse_blocks_destructive_mcp_tool() {
 
     run_with_io(cli(&audit), &mut input, &mut output, &mut error).expect("hook succeeds");
 
-    assert!(error.is_empty());
+    assert!(
+        !error.is_empty(),
+        "non-allow decision should write to stderr"
+    );
     let output_json: Value = serde_json::from_slice(&output).expect("stdout is json");
     assert_eq!(
         output_json["hookSpecificOutput"]["permissionDecision"],
@@ -321,7 +336,10 @@ fn claude_pretooluse_multiedit_uses_strictest_target() {
 
     run_with_io(cli(&audit), &mut input, &mut output, &mut error).expect("hook succeeds");
 
-    assert!(error.is_empty());
+    assert!(
+        !error.is_empty(),
+        "non-allow decision should write to stderr"
+    );
     let output_json: Value = serde_json::from_slice(&output).expect("stdout is json");
     assert_eq!(
         output_json["hookSpecificOutput"]["permissionDecision"],
@@ -349,7 +367,10 @@ fn claude_pretooluse_bounds_persisted_prompt_context() {
 
     run_with_io(cli(&audit), &mut input, &mut output, &mut error).expect("hook succeeds");
 
-    assert!(error.is_empty());
+    assert!(
+        !error.is_empty(),
+        "non-allow decision should write to stderr"
+    );
     let state_dir = audit.parent().expect("audit has parent").join("state");
     let recent_events = descry_context::read_recent_events(&state_dir).expect("events read");
     let stored_prompt = recent_events[0]
@@ -400,7 +421,10 @@ fn claude_pretooluse_enriches_context_from_project_index() {
     )
     .expect("hook succeeds");
 
-    assert!(error.is_empty());
+    assert!(
+        !error.is_empty(),
+        "non-allow decision should write to stderr"
+    );
     let output_json: Value = serde_json::from_slice(&output).expect("stdout is json");
     assert_eq!(
         output_json["hookSpecificOutput"]["permissionDecision"],

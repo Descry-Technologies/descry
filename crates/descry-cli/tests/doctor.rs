@@ -177,6 +177,7 @@ fn doctor_fix_initializes_project_and_installs_hooks() {
     let mut error = Vec::new();
     let cli = Cli {
         command: Commands::Doctor {
+            json: true,
             project: Some(project.clone()),
             fix: true,
             agent: DoctorAgent::All,
@@ -278,6 +279,7 @@ fn run_doctor(
     let mut error = Vec::new();
     let cli = Cli {
         command: Commands::Doctor {
+            json: true,
             project: None,
             fix: false,
             agent: DoctorAgent::All,
@@ -307,6 +309,7 @@ fn run_project_doctor(project: &std::path::Path) -> (i32, Vec<u8>) {
     let mut error = Vec::new();
     let cli = Cli {
         command: Commands::Doctor {
+            json: true,
             project: Some(project.to_path_buf()),
             fix: false,
             agent: DoctorAgent::All,
@@ -333,6 +336,7 @@ fn run_project_doctor_with_agent(project: &Path, fix: bool, agent: DoctorAgent) 
     let mut error = Vec::new();
     let cli = Cli {
         command: Commands::Doctor {
+            json: true,
             project: Some(project.to_path_buf()),
             fix,
             agent,

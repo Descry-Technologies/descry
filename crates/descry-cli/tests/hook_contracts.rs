@@ -123,7 +123,12 @@ fn run_hook(cli: Cli, input: &mut dyn std::io::Read) -> Result<Vec<u8>, descry_c
     let mut output = Vec::new();
     let mut error = Vec::new();
     run_with_io(cli, input, &mut output, &mut error)?;
-    assert!(error.is_empty());
+    // block/require-approval decisions write a human-readable message to stderr
+    let error_str = String::from_utf8_lossy(&error);
+    assert!(
+        error_str.is_empty() || error_str.contains("Descry:"),
+        "unexpected stderr: {error_str}"
+    );
     Ok(output)
 }
 

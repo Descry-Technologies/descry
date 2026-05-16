@@ -15,7 +15,7 @@ fn codex_pretooluse_blocks_rm_rf_home_and_writes_audit() {
     let result = run_with_io(cli(&audit), &mut input, &mut output, &mut error);
 
     result.expect("hook succeeds");
-    assert!(error.is_empty());
+    assert!(!error.is_empty(), "block decision should write to stderr");
     let output_json: Value = serde_json::from_slice(&output).expect("stdout is json");
     assert_eq!(
         output_json["hookSpecificOutput"]["permissionDecision"],
@@ -46,7 +46,7 @@ fn codex_pretooluse_blocks_destructive_mcp_tool() {
 
     run_with_io(cli(&audit), &mut input, &mut output, &mut error).expect("hook succeeds");
 
-    assert!(error.is_empty());
+    assert!(!error.is_empty(), "block decision should write to stderr");
     let output_json: Value = serde_json::from_slice(&output).expect("stdout is json");
     assert_eq!(
         output_json["hookSpecificOutput"]["permissionDecision"],
@@ -80,7 +80,7 @@ fn codex_pretooluse_blocks_multi_target_patch_with_secret() {
 
     run_with_io(cli(&audit), &mut input, &mut output, &mut error).expect("hook succeeds");
 
-    assert!(error.is_empty());
+    assert!(!error.is_empty(), "block decision should write to stderr");
     let output_json: Value = serde_json::from_slice(&output).expect("stdout is json");
     assert_eq!(
         output_json["hookSpecificOutput"]["permissionDecision"],

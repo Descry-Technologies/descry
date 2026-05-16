@@ -16,6 +16,7 @@ fn init_dry_run_reports_paths_without_writing() {
     run_with_io(
         Cli {
             command: Commands::Init {
+                json: true,
                 project: tempdir.path().to_path_buf(),
                 dry_run: true,
                 all: false,
@@ -50,6 +51,7 @@ fn init_writes_project_config_state_memory_and_index() {
     run_with_io(
         Cli {
             command: Commands::Init {
+                json: true,
                 project: tempdir.path().to_path_buf(),
                 dry_run: false,
                 all: false,
@@ -87,6 +89,7 @@ fn init_all_initializes_project_and_installs_project_hooks() {
     run_with_io(
         Cli {
             command: Commands::Init {
+                json: true,
                 project: tempdir.path().to_path_buf(),
                 dry_run: false,
                 all: true,

@@ -16,7 +16,7 @@ fn cursor_before_shell_execution_blocks_rm_rf_home_and_writes_audit() {
     let result = run_with_io(shell_cli(&audit), &mut input, &mut output, &mut error);
 
     result.expect("hook succeeds");
-    assert!(error.is_empty());
+    assert!(!error.is_empty(), "block decision should write to stderr");
     let output_json: Value = serde_json::from_slice(&output).expect("stdout is json");
     assert_eq!(output_json["permission"], "deny");
     assert_eq!(output_json["decision"], "deny");
@@ -68,7 +68,7 @@ fn cursor_before_mcp_execution_blocks_production_control_plane() {
     let result = run_with_io(mcp_cli(&audit), &mut input, &mut output, &mut error);
 
     result.expect("hook succeeds");
-    assert!(error.is_empty());
+    assert!(!error.is_empty(), "block decision should write to stderr");
     let output_json: Value = serde_json::from_slice(&output).expect("stdout is json");
     assert_eq!(output_json["permission"], "deny");
     assert!(output_json["reason"]
@@ -95,7 +95,7 @@ fn cursor_before_mcp_execution_blocks_destructive_tool_name() {
     let result = run_with_io(mcp_cli(&audit), &mut input, &mut output, &mut error);
 
     result.expect("hook succeeds");
-    assert!(error.is_empty());
+    assert!(!error.is_empty(), "block decision should write to stderr");
     let output_json: Value = serde_json::from_slice(&output).expect("stdout is json");
     assert_eq!(output_json["permission"], "deny");
     assert!(output_json["reason"]
@@ -129,7 +129,7 @@ fn cursor_before_mcp_execution_blocks_dangerous_argument_key_without_values() {
     let result = run_with_io(mcp_cli(&audit), &mut input, &mut output, &mut error);
 
     result.expect("hook succeeds");
-    assert!(error.is_empty());
+    assert!(!error.is_empty(), "block decision should write to stderr");
     let output_json: Value = serde_json::from_slice(&output).expect("stdout is json");
     assert_eq!(output_json["permission"], "deny");
     assert!(output_json["reason"]
