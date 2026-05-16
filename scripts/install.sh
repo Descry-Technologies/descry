@@ -36,9 +36,10 @@ LATEST_TAG=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/
 
 INSTALLED=false
 if [ -n "$LATEST_TAG" ]; then
+    VERSION="${LATEST_TAG#v}"
     case "$OS" in
-        linux)  ASSET="${BINARY}-${LATEST_TAG}-${ARCH}-unknown-linux-musl.tar.gz" ;;
-        darwin) ASSET="${BINARY}-${LATEST_TAG}-${ARCH}-apple-darwin.tar.gz" ;;
+        linux)  ASSET="${BINARY}-${VERSION}-${ARCH}-unknown-linux-gnu.tar.gz" ;;
+        darwin) ASSET="${BINARY}-${VERSION}-${ARCH}-apple-darwin.tar.gz" ;;
         *)      ASSET="" ;;
     esac
 
@@ -46,12 +47,14 @@ if [ -n "$LATEST_TAG" ]; then
         URL="https://github.com/$REPO/releases/download/$LATEST_TAG/$ASSET"
         if curl -fsSL "$URL" -o /tmp/descry.tar.gz 2>/dev/null; then
             echo "  Downloading $LATEST_TAG prebuilt binary..."
+            EXTRACT_DIR="/tmp/${ASSET%.tar.gz}"
+            rm -rf "$EXTRACT_DIR"
             tar -xzf /tmp/descry.tar.gz -C /tmp/
             INSTALL_DIR="${HOME}/.local/bin"
             mkdir -p "$INSTALL_DIR"
-            mv /tmp/descry "$INSTALL_DIR/descry"
+            mv "$EXTRACT_DIR/descry" "$INSTALL_DIR/descry"
             chmod +x "$INSTALL_DIR/descry"
-            rm -f /tmp/descry.tar.gz
+            rm -rf /tmp/descry.tar.gz "$EXTRACT_DIR"
             echo "  Installed to $INSTALL_DIR/descry"
             INSTALLED=true
         fi

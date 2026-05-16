@@ -36,14 +36,14 @@ class Descry < Formula
 
   on_macos do
     if Hardware::CPU.arm?
-      url "https://github.com/descry-dev/descry/releases/download/v$VERSION/descry-$VERSION-$MACOS_TARGET.tar.gz"
+      url "https://github.com/Descry-Technologies/descry/releases/download/v$VERSION/descry-$VERSION-$MACOS_TARGET.tar.gz"
       sha256 "$macos_sha"
     end
   end
 
   on_linux do
     if Hardware::CPU.intel?
-      url "https://github.com/descry-dev/descry/releases/download/v$VERSION/descry-$VERSION-$LINUX_TARGET.tar.gz"
+      url "https://github.com/Descry-Technologies/descry/releases/download/v$VERSION/descry-$VERSION-$LINUX_TARGET.tar.gz"
       sha256 "$linux_sha"
     end
   end

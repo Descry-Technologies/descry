@@ -117,9 +117,13 @@ impl AuditChain {
         event.record_hash =
             record_hash(&self.repo_id_hash, event.seq, &event.prev_hash, &canonical);
 
-        serde_json::to_writer(&mut file, &event)?;
-        file.write_all(b"\n")?;
-        file.flush()?;
+        // Serialize to a complete buffer first, then issue a single write_all.
+        // A single write(2) with O_APPEND is atomic at the VFS layer, so even
+        // if flock has an edge-case timing gap between separate processes,
+        // the record bytes cannot be interleaved with another writer's bytes.
+        let mut record = serde_json::to_vec(&event)?;
+        record.push(b'\n');
+        file.write_all(&record)?;
         file.sync_data()?;
         let _ = file.unlock();
 
