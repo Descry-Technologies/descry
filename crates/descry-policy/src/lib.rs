@@ -8,7 +8,10 @@ use std::fmt;
 
 use matcher::CompiledHardBlock;
 
-pub use types::{ActionRule, AssetRule, HardBlock, Policy, Project, ProjectConfig, ProjectPolicy};
+pub use types::{
+    ActionRule, AssetRule, HardBlock, Policy, Project, ProjectConfig, ProjectPolicy,
+    ProjectPolicyError,
+};
 
 #[derive(Debug)]
 pub enum PolicyError {

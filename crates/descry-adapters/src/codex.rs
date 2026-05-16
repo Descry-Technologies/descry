@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use descry_core::acp::{Action, Actor, Asset, BlastRadius, Context, Intent};
-use descry_core::{ActionContextPacket, InstructionProvenance};
+use descry_core::{ActionContextPacket, InstructionProvenance, TrustLevel};
 
 use crate::provenance;
 use serde::Deserialize;
@@ -36,7 +36,7 @@ pub fn normalize_pretooluse(input: &CodexHookInput) -> ActionContextPacket {
             actor_type: String::from("agent"),
             name: String::from("codex-cli"),
             owner: String::from("local"),
-            trust_level: String::from("local_dev_agent"),
+            trust_level: TrustLevel::LocalDevAgent,
         },
         action: Action {
             action_type: action_type.to_string(),

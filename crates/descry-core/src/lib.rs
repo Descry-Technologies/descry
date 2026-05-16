@@ -3,8 +3,9 @@ pub mod decision;
 pub mod risk;
 pub mod runtime;
 pub mod scope;
+pub mod signing_key;
 
-pub use acp::{ActionContextPacket, InstructionProvenance};
+pub use acp::{ActionContextPacket, InstructionProvenance, TrustLevel};
 pub use decision::{Decision, DecisionOutput};
 pub use risk::{Confidence, RiskScore};
 pub use runtime::{

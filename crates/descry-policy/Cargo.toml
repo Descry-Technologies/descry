@@ -13,6 +13,7 @@ path = "src/lib.rs"
 
 [dependencies]
 descry-core = { path = "../descry-core" }
+globset = { workspace = true }
 regex = { workspace = true }
 serde = { workspace = true }
 serde_yml = { workspace = true }

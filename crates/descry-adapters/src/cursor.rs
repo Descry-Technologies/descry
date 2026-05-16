@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use descry_core::acp::{Action, Actor, Asset, BlastRadius, Context, Intent};
-use descry_core::{ActionContextPacket, InstructionProvenance};
+use descry_core::{ActionContextPacket, InstructionProvenance, TrustLevel};
 
 use crate::provenance;
 use serde::{Deserialize, Serialize};
@@ -65,7 +65,7 @@ pub fn normalize_before_shell_execution(input: &CursorShellHookInput) -> ActionC
             actor_type: String::from("agent"),
             name: String::from("cursor"),
             owner: String::from("local"),
-            trust_level: String::from("local_dev_agent"),
+            trust_level: TrustLevel::LocalDevAgent,
         },
         action: Action {
             action_type: String::from("shell.exec"),
@@ -112,7 +112,7 @@ pub fn normalize_before_mcp_execution(input: &CursorMcpHookInput) -> ActionConte
             actor_type: String::from("agent"),
             name: String::from("cursor"),
             owner: String::from("local"),
-            trust_level: String::from("local_dev_agent"),
+            trust_level: TrustLevel::LocalDevAgent,
         },
         action: Action {
             action_type: String::from("mcp.call"),

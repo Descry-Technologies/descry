@@ -1733,6 +1733,7 @@ mod tests {
     use descry_core::acp::{Action, Actor, Asset, BlastRadius, Context, Intent};
     use descry_core::{
         Decision, EvidenceRef, EvidenceSource, ScopeContract, ScopePermit, ScopePermitKind,
+        TrustLevel,
     };
     use descry_memory::Approval;
     use descry_policy::Policy;
@@ -1745,7 +1746,7 @@ mod tests {
                 actor_type: String::from("agent"),
                 name: String::from("codex"),
                 owner: String::from("local"),
-                trust_level: String::from("local_dev_agent"),
+                trust_level: TrustLevel::LocalDevAgent,
             },
             action: Action {
                 action_type: action_type.to_string(),

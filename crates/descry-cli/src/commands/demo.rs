@@ -2,7 +2,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use descry_core::acp::{Action, Actor, Asset, BlastRadius, Context, Intent};
-use descry_core::{ActionContextPacket, AssetMatch, Decision};
+use descry_core::{ActionContextPacket, AssetMatch, Decision, TrustLevel};
 use descry_engine::{build_decision_input, evaluate, EvaluationRuntime};
 use descry_policy::ProjectPolicy;
 use serde_json::json;
@@ -318,7 +318,7 @@ fn acp(spec: AcpSpec<'_>) -> ActionContextPacket {
             actor_type: String::from("agent"),
             name: spec.actor.to_string(),
             owner: String::from("local"),
-            trust_level: String::from("local_dev_agent"),
+            trust_level: TrustLevel::LocalDevAgent,
         },
         action: Action {
             action_type: spec.action_type.to_string(),

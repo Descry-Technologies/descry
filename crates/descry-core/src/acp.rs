@@ -1,4 +1,75 @@
-use serde::{Deserialize, Serialize};
+use std::fmt;
+
+use serde::de::{Error as DeError, Unexpected, Visitor};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+/// Validated enumeration of agent trust levels.
+///
+/// Unknown values deserialize to `TrustLevel::Unknown` rather than failing,
+/// preserving forward compatibility while guaranteeing the set of recognized
+/// levels is closed and auditable.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum TrustLevel {
+    LocalDevAgent,
+    CiAgent,
+    RemoteAgent,
+    Unknown,
+}
+
+impl TrustLevel {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::LocalDevAgent => "local_dev_agent",
+            Self::CiAgent => "ci_agent",
+            Self::RemoteAgent => "remote_agent",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+impl fmt::Display for TrustLevel {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl Serialize for TrustLevel {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for TrustLevel {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct TrustLevelVisitor;
+
+        impl Visitor<'_> for TrustLevelVisitor {
+            type Value = TrustLevel;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str(
+                    "a trust level string: local_dev_agent, ci_agent, remote_agent, or unknown",
+                )
+            }
+
+            fn visit_str<E: DeError>(self, value: &str) -> Result<TrustLevel, E> {
+                Ok(match value {
+                    "local_dev_agent" => TrustLevel::LocalDevAgent,
+                    "ci_agent" => TrustLevel::CiAgent,
+                    "remote_agent" => TrustLevel::RemoteAgent,
+                    _ => {
+                        // Warn callers about unrecognized values by emitting "unknown"
+                        // rather than hard-erroring, preserving forward compatibility.
+                        let _ = Unexpected::Str(value);
+                        TrustLevel::Unknown
+                    }
+                })
+            }
+        }
+
+        deserializer.deserialize_str(TrustLevelVisitor)
+    }
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -35,7 +106,7 @@ pub struct Actor {
     pub actor_type: String,
     pub name: String,
     pub owner: String,
-    pub trust_level: String,
+    pub trust_level: TrustLevel,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]

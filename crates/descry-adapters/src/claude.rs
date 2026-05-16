@@ -1,5 +1,5 @@
 use descry_core::acp::{Action, Actor, Asset, BlastRadius, Context, Intent};
-use descry_core::{ActionContextPacket, InstructionProvenance};
+use descry_core::{ActionContextPacket, InstructionProvenance, TrustLevel};
 
 use crate::provenance;
 use serde::{Deserialize, Serialize};
@@ -50,7 +50,7 @@ pub fn normalize_pretooluse(input: &ClaudeHookInput) -> ActionContextPacket {
             actor_type: String::from("agent"),
             name: String::from("claude-code"),
             owner: String::from("local"),
-            trust_level: String::from("local_dev_agent"),
+            trust_level: TrustLevel::LocalDevAgent,
         },
         action: Action {
             action_type: String::from(action_type),

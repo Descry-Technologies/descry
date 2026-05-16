@@ -8,6 +8,47 @@ All notable user-facing changes are documented here. Format follows [Keep a Chan
 
 ---
 
+## [0.2.0] — 2026-05-16
+
+Enterprise hardening pass — production-grade auth, observability, cryptographic scope contracts, and robust glob matching.
+
+### Security
+
+- Bearer token authentication on `POST /v1/approve` — requests without a valid token receive `401 Unauthorized`
+- Constant-time token comparison to prevent timing-side-channel attacks
+- `descry daemon init-token` CLI subcommand — generates a 256-bit token, writes it to `~/.descry/daemon.token` (mode 0600), and prints the `Authorization: Bearer <token>` header to use
+- Token path configurable via `DESCRY_DAEMON_TOKEN_FILE` environment variable
+- Machine-local HMAC-SHA256 signing key (`descry_core::signing_key`) — auto-generated and persisted at `~/.descry/signing.key` (mode 0600) on first use
+- `ScopeContract::signed_keyed(signing_key)` and `verify_signature_keyed(signing_key)` — HMAC-SHA256 keyed scope contract signing, replacing the previous unsigned default path
+
+### Observability
+
+- Structured logging via `tracing` + `tracing-subscriber` — log level controlled by `DESCRY_LOG` env var (default `info`)
+- `GET /v1/metrics` — Prometheus text-format counter endpoint: `descry_decisions_total{decision="allow|allow_with_log|ask|require_approval|block"}` and `descry_errors_total`
+- All `pretooluse` decisions logged at `INFO` level with tool, decision, and reason fields
+
+### Policy
+
+- Replaced hand-rolled `glob_to_regex` + `Regex` with `globset::GlobSet` for asset pattern matching — battle-tested glob semantics, precompiled at policy load time
+- `ProjectPolicyError` enum with `InvalidYaml` and `InvalidGlob { rule_id, source }` variants — glob compilation errors are now typed and carry the failing rule ID
+- `match_asset` uses precompiled `GlobSet` iterators — no per-call regex compilation
+
+### Core types
+
+- `TrustLevel` enum (`LocalDevAgent`, `CiAgent`, `RemoteAgent`, `Unknown`) replacing free-string `trust_level` field on `Actor` — forward-compatible serde: unrecognized strings deserialize to `Unknown` instead of failing
+- `Decision::as_str()` — canonical lowercase string representation of each verdict variant
+
+### Daemon
+
+- Persistent daemon state directory: `~/.descry/daemon/` (previously a temporary directory discarded on process exit)
+- State directory configurable via `DESCRY_DAEMON_STATE_DIR` environment variable
+
+### Fixed
+
+- `approve_rejects_invalid_token` and `approve_accepts_correct_token` tests no longer race on shared environment variables — all env-mutating tests serialize through a process-wide mutex
+
+---
+
 ## [0.1.0] — 2026-05-16
 
 First public release of the Descry action firewall.

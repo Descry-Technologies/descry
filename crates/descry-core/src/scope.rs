@@ -1,9 +1,11 @@
+use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::ActionClass;
 
 const SIGNATURE_ALGORITHM: &str = "sha256:descry-scope-v1";
+const HMAC_ALGORITHM: &str = "hmac-sha256:descry-scope-v1";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -103,6 +105,8 @@ struct UnsignedScopeContract {
 }
 
 impl ScopeContract {
+    /// Create a scope contract signed with keyless SHA-256 (backward-compatible default).
+    /// For new deployments prefer `signed_keyed` which uses HMAC-SHA256 with a machine secret.
     pub fn signed(
         task_summary: impl Into<String>,
         evidence: Vec<EvidenceRef>,
@@ -110,6 +114,51 @@ impl ScopeContract {
         created_at_epoch_seconds: u64,
         expires_at_epoch_seconds: u64,
         confidence: f32,
+    ) -> Result<Self, ScopeContractError> {
+        Self::signed_inner(
+            task_summary,
+            evidence,
+            permits,
+            created_at_epoch_seconds,
+            expires_at_epoch_seconds,
+            confidence,
+            None,
+        )
+    }
+
+    /// Create a scope contract signed with HMAC-SHA256 keyed on `signing_key`.
+    ///
+    /// The key should be loaded from `~/.descry/signing.key` (generated at `descry init`).
+    /// A contract signed with a key can only be verified with the same key — contracts are
+    /// machine-scoped, which prevents cross-machine approval replay.
+    pub fn signed_keyed(
+        task_summary: impl Into<String>,
+        evidence: Vec<EvidenceRef>,
+        permits: Vec<ScopePermit>,
+        created_at_epoch_seconds: u64,
+        expires_at_epoch_seconds: u64,
+        confidence: f32,
+        signing_key: &[u8],
+    ) -> Result<Self, ScopeContractError> {
+        Self::signed_inner(
+            task_summary,
+            evidence,
+            permits,
+            created_at_epoch_seconds,
+            expires_at_epoch_seconds,
+            confidence,
+            Some(signing_key),
+        )
+    }
+
+    fn signed_inner(
+        task_summary: impl Into<String>,
+        evidence: Vec<EvidenceRef>,
+        permits: Vec<ScopePermit>,
+        created_at_epoch_seconds: u64,
+        expires_at_epoch_seconds: u64,
+        confidence: f32,
+        signing_key: Option<&[u8]>,
     ) -> Result<Self, ScopeContractError> {
         let unsigned = unsigned_contract(
             task_summary,
@@ -121,7 +170,10 @@ impl ScopeContract {
         )?;
         let payload = canonical_payload(&unsigned)?;
         let payload_hash = sha256_hex(&payload);
-        let signature = sign_payload(&payload);
+        let signature = match signing_key {
+            Some(key) if !key.is_empty() => sign_payload_keyed(&payload, key),
+            _ => sign_payload(&payload),
+        };
 
         Ok(Self {
             id: payload_hash.chars().take(32).collect(),
@@ -140,12 +192,22 @@ impl ScopeContract {
         self.expires_at_epoch_seconds > now_epoch_seconds
     }
 
+    /// Verify using keyless SHA-256 (for contracts created with `signed()`).
     pub fn verify_signature(&self) -> bool {
         self.expected_signature()
             .is_ok_and(|expected| expected == self.signature)
             && self
                 .expected_id()
                 .is_ok_and(|expected_id| expected_id == self.id)
+    }
+
+    /// Verify using HMAC-SHA256 (for contracts created with `signed_keyed()`).
+    pub fn verify_signature_keyed(&self, signing_key: &[u8]) -> bool {
+        let Ok(unsigned) = self.unsigned() else { return false; };
+        let Ok(payload) = canonical_payload(&unsigned) else { return false; };
+        let expected_sig = sign_payload_keyed(&payload, signing_key);
+        let expected_id = sha256_hex(&payload).chars().take(32).collect::<String>();
+        expected_sig == self.signature && expected_id == self.id
     }
 
     pub fn resigned_with_expiry(
@@ -309,6 +371,18 @@ fn sign_payload(payload: &[u8]) -> ScopeSignature {
     ScopeSignature {
         algorithm: SIGNATURE_ALGORITHM.to_string(),
         value: bytes_to_hex(&hasher.finalize()),
+    }
+}
+
+fn sign_payload_keyed(payload: &[u8], key: &[u8]) -> ScopeSignature {
+    type HmacSha256 = Hmac<Sha256>;
+    let mut mac = HmacSha256::new_from_slice(key).expect("HMAC accepts any key size");
+    mac.update(HMAC_ALGORITHM.as_bytes());
+    mac.update(b"\n");
+    mac.update(payload);
+    ScopeSignature {
+        algorithm: HMAC_ALGORITHM.to_string(),
+        value: bytes_to_hex(&mac.finalize().into_bytes()),
     }
 }
 

@@ -188,6 +188,9 @@ pub enum DaemonAction {
         #[arg(long, default_value = "127.0.0.1:7777")]
         bind: SocketAddr,
     },
+    /// Generate a bearer token for the daemon's /v1/approve endpoint.
+    /// Writes to ~/.descry/daemon.token (mode 600). Safe to re-run; rotates the token.
+    InitToken,
 }
 
 #[derive(Debug, Subcommand)]

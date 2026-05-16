@@ -58,7 +58,14 @@ Better precision, richer UX, broader agent support.
 - Richer `require_approval` UX: inline fix suggestion + override phrase
 - More Tier-1 rules: Kubernetes destructive ops, GH Actions secret exfil patterns
 - Better `descry baseline explain` with escalation context
-- Daemon promotion: scope-contract cache, 60s policy file watch
+- ~~Daemon promotion: bearer token auth on `/v1/approve`, Prometheus metrics at `/v1/metrics`~~ **Done (v0.2.0)**
+- ~~Structured tracing logs via `DESCRY_LOG` env var~~ **Done (v0.2.0)**
+- ~~`TrustLevel` enum replacing free-string trust field~~ **Done (v0.2.0)**
+- ~~HMAC-SHA256 keyed scope contract signing~~ **Done (v0.2.0)**
+- ~~Machine-local signing key (`~/.descry/signing.key`)~~ **Done (v0.2.0)**
+- ~~`globset`-based asset glob precompilation~~ **Done (v0.2.0)**
+- ~~Persistent daemon state directory~~ **Done (v0.2.0)**
+- Daemon scope-contract cache, 60s policy file watch
 - Device identity in audit events (stable, non-PII SHA-256 of hostname+user)
 - Redaction manifest in export bundles for compliance-safe sharing
 
