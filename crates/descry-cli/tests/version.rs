@@ -7,7 +7,7 @@ fn version_contains_package_version() {
     let version = command.render_version().to_string();
 
     assert!(
-        version.contains("descry 0.1.0"),
+        version.contains("descry 0.2.0"),
         "unexpected version output: {version}"
     );
 }
