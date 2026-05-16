@@ -384,7 +384,7 @@ descry-verify --chain .descry/audit.log --export-bundle
 
 Descry runs at normal user privileges. A hostile process running as the same user can kill the hook. **Its purpose is blocking accidental harm and prompt-injection-driven harm in normal developer workflows — not defeating a malicious local user.**
 
-This is stated here, in `descry doctor` output, and in [LICENSE-PROMISE.md](LICENSE-PROMISE.md).
+This is stated here, in `descry doctor` output, and in [OPEN-SOURCE-PROMISE.md](OPEN-SOURCE-PROMISE.md).
 
 ---
 
@@ -450,13 +450,13 @@ Covered crates: `descry-core` · `descry-engine` · `descry-adapters` · `descry
 
 A future commercial platform (team policy sync, cloud audit retention, SSO, SIEM export) lives in a separate repository under a separate license and is never required to run Descry locally.
 
-See [LICENSE-PROMISE.md](LICENSE-PROMISE.md) for the full binding commitment.
+See [OPEN-SOURCE-PROMISE.md](OPEN-SOURCE-PROMISE.md) for the full binding commitment.
 
 ---
 
 <div align="center">
 
-**[Website](https://descry.app)** · **[CONTRIBUTING.md](CONTRIBUTING.md)** · **[SECURITY.md](SECURITY.md)** · **[LICENSE-PROMISE.md](LICENSE-PROMISE.md)**
+**[Website](https://descry.app)** · **[CONTRIBUTING.md](CONTRIBUTING.md)** · **[SECURITY.md](SECURITY.md)** · **[OPEN-SOURCE-PROMISE.md](OPEN-SOURCE-PROMISE.md)**
 
 Apache-2.0 · No paywall on safety
 

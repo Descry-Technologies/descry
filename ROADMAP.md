@@ -107,4 +107,4 @@ The revenue layer. All modules report to the same event bus. The dashboard corre
 
 The Action Firewall. Every crate in the `descry` workspace. Every policy pack published here. Every audit primitive. The standalone verifier. The proof bundle format.
 
-See [LICENSE-PROMISE.md](LICENSE-PROMISE.md).
+See [OPEN-SOURCE-PROMISE.md](OPEN-SOURCE-PROMISE.md).
