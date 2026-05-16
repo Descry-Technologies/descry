@@ -110,13 +110,7 @@ impl AuditChain {
         let (prev_hash, next_seq) = current_tail(&mut file)?;
 
         let mut event = AuditEvent::pending(
-            next_seq,
-            timestamp,
-            decision,
-            acp_hash,
-            rule_id,
-            reason,
-            prev_hash,
+            next_seq, timestamp, decision, acp_hash, rule_id, reason, prev_hash,
         )
         .with_context(context);
         let canonical = canonical_minus_record_hash(&event)?;

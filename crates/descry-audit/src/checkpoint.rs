@@ -48,7 +48,10 @@ pub fn compute_merkle_root(hashes: &[&str]) -> String {
     let mut level: Vec<String> = hashes
         .iter()
         .map(|&s| s.to_string())
-        .chain(std::iter::repeat_n(last.to_string(), next_pow2 - hashes.len()))
+        .chain(std::iter::repeat_n(
+            last.to_string(),
+            next_pow2 - hashes.len(),
+        ))
         .collect();
 
     while level.len() > 1 {
