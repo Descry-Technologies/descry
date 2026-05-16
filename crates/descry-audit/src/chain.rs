@@ -1,5 +1,5 @@
 use std::fs::{self, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use crate::canonical::canonical_minus_record_hash;
@@ -32,34 +32,17 @@ impl AuditChain {
             .read(true)
             .append(true)
             .open(&path)?;
-        let mut head = None;
-        let lines: Vec<_> = BufReader::new(file).lines().collect();
-        let total = lines.len();
 
-        for (index, line) in lines.into_iter().enumerate() {
-            let line_number = index as u64 + 1;
-            let line = line?;
-            let trimmed = line.trim_matches('\0').trim();
-            if trimmed.is_empty() || !trimmed.starts_with('{') {
-                continue;
-            }
-            match serde_json::from_str::<AuditEvent>(trimmed) {
-                Ok(event) => head = Some(event),
-                Err(error) => {
-                    // Tolerate a truncated last line — a concurrent writer may
-                    // not have finished flushing. Fail hard on interior corruption.
-                    let is_last = line_number == total as u64;
-                    if !is_last {
-                        return Err(AuditError::MalformedRecord {
-                            line: line_number,
-                            reason: error.to_string(),
-                        });
-                    }
-                }
-            }
-        }
+        // Shared lock: blocks until any concurrent exclusive writer has fsynced and
+        // released, so we never read a partially-written record.
+        file.lock_shared()?;
 
-        let next_seq = head.as_ref().map_or(1, |event| event.seq + 1);
+        let scan_result = scan_tail(&file);
+
+        // Lock released on drop; explicit unlock is cleaner.
+        let _ = file.unlock();
+
+        let (head, next_seq) = scan_result?;
 
         Ok(Self {
             path,
@@ -114,12 +97,20 @@ impl AuditChain {
         reason: Option<String>,
         context: AuditEventContext,
     ) -> Result<&AuditEvent, AuditError> {
-        let prev_hash = self.head.as_ref().map_or_else(
-            || GENESIS_PREV_HASH.to_string(),
-            |event| event.record_hash.clone(),
-        );
+        let mut file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .append(true)
+            .open(&self.path)?;
+
+        // Exclusive lock before read-then-write: prevents interleaved bytes from
+        // concurrent hook invocations and ensures prev_hash is from the actual tail.
+        file.lock()?;
+
+        let (prev_hash, next_seq) = current_tail(&mut file)?;
+
         let mut event = AuditEvent::pending(
-            self.next_seq,
+            next_seq,
             timestamp,
             decision,
             acp_hash,
@@ -132,16 +123,13 @@ impl AuditChain {
         event.record_hash =
             record_hash(&self.repo_id_hash, event.seq, &event.prev_hash, &canonical);
 
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)?;
         serde_json::to_writer(&mut file, &event)?;
         file.write_all(b"\n")?;
         file.flush()?;
         file.sync_data()?;
+        let _ = file.unlock();
 
-        self.next_seq += 1;
+        self.next_seq = next_seq + 1;
         self.head = Some(event);
         Ok(self.head.as_ref().expect("head was just assigned"))
     }
@@ -159,10 +147,73 @@ impl AuditChain {
     }
 }
 
+/// Scans the file (under a caller-held shared lock) for the last valid record.
+/// Returns (head, next_seq).
+fn scan_tail(file: &std::fs::File) -> Result<(Option<AuditEvent>, u64), AuditError> {
+    let mut head = None;
+    let lines: Vec<_> = BufReader::new(file).lines().collect();
+    let total = lines.len();
+
+    for (index, line) in lines.into_iter().enumerate() {
+        let line_number = index as u64 + 1;
+        let line = line?;
+        let trimmed = line.trim_matches('\0').trim();
+        if trimmed.is_empty() || !trimmed.starts_with('{') {
+            continue;
+        }
+        match serde_json::from_str::<AuditEvent>(trimmed) {
+            Ok(event) => head = Some(event),
+            Err(error) => {
+                // Tolerate a truncated last line — a concurrent writer may not
+                // have finished flushing. Fail hard on interior corruption.
+                let is_last = line_number == total as u64;
+                if !is_last {
+                    return Err(AuditError::MalformedRecord {
+                        line: line_number,
+                        reason: error.to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    let next_seq = head.as_ref().map_or(1, |event| event.seq + 1);
+    Ok((head, next_seq))
+}
+
+/// Reads the last valid record from the file under an already-held exclusive lock.
+/// Returns (prev_hash, next_seq).
+fn current_tail(file: &mut std::fs::File) -> Result<(String, u64), AuditError> {
+    let file_len = file.seek(SeekFrom::End(0))?;
+    if file_len == 0 {
+        return Ok((GENESIS_PREV_HASH.to_string(), 1));
+    }
+
+    // Read the last 8 KiB — enough for one full record plus some slack.
+    let read_start = file_len.saturating_sub(8192);
+    file.seek(SeekFrom::Start(read_start))?;
+    let mut buf = String::new();
+    file.read_to_string(&mut buf)?;
+
+    // Use next_back() — Lines is DoubleEndedIterator, so this is O(1) from tail.
+    let last_event = buf
+        .lines()
+        .filter(|l| {
+            let t = l.trim_matches('\0').trim();
+            !t.is_empty() && t.starts_with('{')
+        })
+        .filter_map(|l| serde_json::from_str::<AuditEvent>(l.trim()).ok())
+        .next_back();
+
+    match last_event {
+        Some(event) => Ok((event.record_hash.clone(), event.seq + 1)),
+        None => Ok((GENESIS_PREV_HASH.to_string(), 1)),
+    }
+}
+
 #[cfg(test)]
 fn read_first_event(path: &Path) -> Result<Option<AuditEvent>, AuditError> {
     use std::fs::File;
-    use std::io::{Seek, SeekFrom};
 
     let mut file = File::open(path)?;
     file.seek(SeekFrom::Start(0))?;
@@ -224,5 +275,47 @@ mod tests {
         std::fs::write(&path, body).expect("audit log mutates");
 
         AuditChain::open_verified(&path, "test-repo").expect_err("tampered chain fails");
+    }
+
+    #[test]
+    fn concurrent_appends_produce_valid_chain() {
+        use std::thread;
+
+        let tempdir = tempfile::tempdir().expect("tempdir");
+        let path = tempdir.path().join("audit.log");
+
+        let handles: Vec<_> = (0..8)
+            .map(|i| {
+                let p = path.clone();
+                thread::spawn(move || {
+                    let mut chain = AuditChain::open(&p, "test-repo").expect("chain opens");
+                    chain
+                        .append(
+                            format!("2026-05-11T20:00:{i:02}Z"),
+                            "allow",
+                            format!("acp-{i}"),
+                            None,
+                            None,
+                        )
+                        .expect("append succeeds");
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().expect("thread did not panic");
+        }
+
+        // All 8 records must be parseable and have unique seqs 1..=8.
+        let body = std::fs::read_to_string(&path).expect("reads");
+        let events: Vec<super::AuditEvent> = body
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(|l| serde_json::from_str(l).expect("valid JSON"))
+            .collect();
+        assert_eq!(events.len(), 8);
+        let mut seqs: Vec<u64> = events.iter().map(|e| e.seq).collect();
+        seqs.sort_unstable();
+        assert_eq!(seqs, vec![1, 2, 3, 4, 5, 6, 7, 8]);
     }
 }
