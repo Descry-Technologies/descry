@@ -67,19 +67,23 @@ cd descry
 cargo install --locked --path crates/descry-cli
 ```
 
-Wire it into your agent:
+**Simplest path — one command:**
+
+```bash
+cd your-project
+descry setup                  # initializes .descry/ and installs hooks in one step
+descry doctor                 # verify everything is wired
+```
+
+**Or step by step:**
 
 ```bash
 descry hook install claude    # Claude Code
 descry hook install codex     # OpenAI Codex
 descry hook install cursor    # Cursor (shell + MCP)
-```
 
-Initialize a project:
-
-```bash
 cd your-project
-descry init --all             # creates .descry/, installs hooks, builds project index
+descry init --all             # creates .descry/, builds project index
 descry doctor                 # verify everything is wired
 ```
 
