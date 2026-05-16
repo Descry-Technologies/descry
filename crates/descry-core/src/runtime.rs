@@ -586,11 +586,14 @@ fn read_recent_file_targets(state_dir: &Path) -> std::io::Result<Vec<String>> {
     let mut targets = Vec::new();
     for line in BufReader::new(file).lines() {
         let line = line?;
-        if line.trim().is_empty() {
+        // Skip blank lines and null-byte corruption from concurrent writes.
+        let trimmed = line.trim_matches('\0').trim();
+        if trimmed.is_empty() || !trimmed.starts_with('{') {
             continue;
         }
-        let event: serde_json::Value = serde_json::from_str(&line)
-            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+        let Ok(event) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+            continue;
+        };
         let action_type = event
             .get("action_type")
             .and_then(serde_json::Value::as_str)
