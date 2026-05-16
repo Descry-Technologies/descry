@@ -123,6 +123,26 @@ pub fn load_approvals(path: &Path) -> Result<Vec<Approval>, MemoryError> {
     Ok(approvals)
 }
 
+/// Write `data` to `path` atomically: write to a uniquely-named sibling temp file,
+/// then rename into place.
+///
+/// Uses PID + thread-ID in the temp file name so concurrent writers never collide
+/// on the same temp file, avoiding the truncate-then-write race that can leave
+/// readers with a partial or empty file.
+fn write_atomic(path: &Path, data: &[u8]) -> Result<(), MemoryError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let pid = std::process::id();
+    let tid = std::thread::current().id();
+    let stem = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+    let tmp_name = format!("{stem}.{pid}.{tid:?}.tmp");
+    let tmp = path.with_file_name(tmp_name);
+    fs::write(&tmp, data)?;
+    fs::rename(&tmp, path)?;
+    Ok(())
+}
+
 fn write_approvals(path: &Path, approvals: &[Approval]) -> Result<(), MemoryError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -426,7 +446,7 @@ pub fn record_behavior(
     };
 
     let body = serde_json::to_string_pretty(&store)?;
-    fs::write(path, format!("{body}\n"))?;
+    write_atomic(path, format!("{body}\n").as_bytes())?;
     Ok(updated)
 }
 

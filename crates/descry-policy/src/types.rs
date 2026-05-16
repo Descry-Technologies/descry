@@ -56,7 +56,10 @@ pub struct Policy {
 #[derive(Debug)]
 pub enum ProjectPolicyError {
     InvalidYaml(serde_yml::Error),
-    InvalidGlob { rule_id: String, source: globset::Error },
+    InvalidGlob {
+        rule_id: String,
+        source: globset::Error,
+    },
 }
 
 impl fmt::Display for ProjectPolicyError {
@@ -64,7 +67,10 @@ impl fmt::Display for ProjectPolicyError {
         match self {
             Self::InvalidYaml(error) => write!(formatter, "invalid project policy yaml: {error}"),
             Self::InvalidGlob { rule_id, source } => {
-                write!(formatter, "invalid glob pattern in asset rule '{rule_id}': {source}")
+                write!(
+                    formatter,
+                    "invalid glob pattern in asset rule '{rule_id}': {source}"
+                )
             }
         }
     }
@@ -125,8 +131,8 @@ pub struct ActionRule {
 impl Default for ProjectPolicy {
     fn default() -> Self {
         let assets = default_asset_rules();
-        let compiled_asset_globs = compile_asset_globs(&assets)
-            .expect("built-in default asset glob patterns are valid");
+        let compiled_asset_globs =
+            compile_asset_globs(&assets).expect("built-in default asset glob patterns are valid");
         Self {
             project: default_project_config(),
             assets,
@@ -139,11 +145,12 @@ impl Default for ProjectPolicy {
 impl ProjectPolicy {
     pub fn load_yaml(yaml: &str) -> Result<Self, ProjectPolicyError> {
         let mut policy: Self = serde_yml::from_str(yaml)?;
-        policy.compiled_asset_globs = compile_asset_globs(&policy.assets)
-            .map_err(|error| ProjectPolicyError::InvalidGlob {
+        policy.compiled_asset_globs = compile_asset_globs(&policy.assets).map_err(|error| {
+            ProjectPolicyError::InvalidGlob {
                 rule_id: error.0,
                 source: error.1,
-            })?;
+            }
+        })?;
         Ok(policy)
     }
 
@@ -165,9 +172,7 @@ impl ProjectPolicy {
     }
 }
 
-fn compile_asset_globs(
-    assets: &[AssetRule],
-) -> Result<Vec<GlobSet>, (String, globset::Error)> {
+fn compile_asset_globs(assets: &[AssetRule]) -> Result<Vec<GlobSet>, (String, globset::Error)> {
     assets
         .iter()
         .map(|asset| {
@@ -278,4 +283,3 @@ fn default_action_rules() -> BTreeMap<String, ActionRule> {
         ),
     ])
 }
-

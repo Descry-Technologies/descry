@@ -10,9 +10,8 @@ use sha2::{Digest, Sha256};
 pub fn load_or_generate(path: &Path) -> std::io::Result<Vec<u8>> {
     if path.exists() {
         let hex = fs::read_to_string(path)?;
-        return hex_decode(hex.trim()).map_err(|e| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-        });
+        return hex_decode(hex.trim())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e));
     }
 
     let key = generate_key();
@@ -56,7 +55,7 @@ fn hex_encode(bytes: &[u8]) -> String {
 }
 
 fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return Err(String::from("odd-length hex string"));
     }
     s.as_bytes()

@@ -20,8 +20,12 @@ fn init_token() -> Result<()> {
         .or_else(|| std::env::var_os("USERPROFILE"))
         .ok_or_else(|| CliError::new("cannot determine home directory ($HOME is unset)", 1))?;
     let descry_dir = std::path::PathBuf::from(home).join(".descry");
-    std::fs::create_dir_all(&descry_dir)
-        .map_err(|error| CliError::new(format!("failed to create {}: {error}", descry_dir.display()), 1))?;
+    std::fs::create_dir_all(&descry_dir).map_err(|error| {
+        CliError::new(
+            format!("failed to create {}: {error}", descry_dir.display()),
+            1,
+        )
+    })?;
 
     let token = generate_token();
     let token_path = descry_dir.join("daemon.token");
@@ -31,15 +35,19 @@ fn init_token() -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&token_path, std::fs::Permissions::from_mode(0o600))
-            .map_err(|error| CliError::new(format!("failed to set token file permissions: {error}"), 1))?;
+        std::fs::set_permissions(&token_path, std::fs::Permissions::from_mode(0o600)).map_err(
+            |error| CliError::new(format!("failed to set token file permissions: {error}"), 1),
+        )?;
     }
 
     let mut stdout = std::io::stdout();
     writeln!(stdout, "token written to: {}", token_path.display())
         .map_err(|error| CliError::new(error.to_string(), 1))?;
-    writeln!(stdout, "use 'Authorization: Bearer {token}' when calling /v1/approve")
-        .map_err(|error| CliError::new(error.to_string(), 1))?;
+    writeln!(
+        stdout,
+        "use 'Authorization: Bearer {token}' when calling /v1/approve"
+    )
+    .map_err(|error| CliError::new(error.to_string(), 1))?;
     Ok(())
 }
 

@@ -203,8 +203,12 @@ impl ScopeContract {
 
     /// Verify using HMAC-SHA256 (for contracts created with `signed_keyed()`).
     pub fn verify_signature_keyed(&self, signing_key: &[u8]) -> bool {
-        let Ok(unsigned) = self.unsigned() else { return false; };
-        let Ok(payload) = canonical_payload(&unsigned) else { return false; };
+        let Ok(unsigned) = self.unsigned() else {
+            return false;
+        };
+        let Ok(payload) = canonical_payload(&unsigned) else {
+            return false;
+        };
         let expected_sig = sign_payload_keyed(&payload, signing_key);
         let expected_id = sha256_hex(&payload).chars().take(32).collect::<String>();
         expected_sig == self.signature && expected_id == self.id

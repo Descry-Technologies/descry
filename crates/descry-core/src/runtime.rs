@@ -33,7 +33,7 @@ pub fn classify_drift_signal(
     blast_radius_reversible: bool,
     instruction_provenance: Option<InstructionProvenance>,
     asset_sensitivity: Option<&str>,
-    task_confidence: f32,
+    _task_confidence: f32,
 ) -> DriftSignal {
     let provenance = instruction_provenance.unwrap_or(InstructionProvenance::AgentReasoning);
 
@@ -50,7 +50,8 @@ pub fn classify_drift_signal(
 
     // Engine classification overrides the adapter's conservative blast_radius default.
     // Known-safe classes are treated as reversible regardless of what the adapter reported.
-    let effective_reversible = blast_radius_reversible || is_inherently_reversible_class(action_class);
+    let effective_reversible =
+        blast_radius_reversible || is_inherently_reversible_class(action_class);
 
     let destructive = is_destructive_class(action_class);
 

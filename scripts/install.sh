@@ -21,6 +21,23 @@ if command -v descry &>/dev/null; then
     exit 0
 fi
 
+# If DESCRY_SOURCE_DIR is set, build from local source immediately (used by CI and dev installs).
+if [ -n "${DESCRY_SOURCE_DIR:-}" ]; then
+    echo "  Building from local source at $DESCRY_SOURCE_DIR..."
+    echo ""
+    if ! command -v cargo &>/dev/null; then
+        echo "  Rust not found. Installing rustup..."
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
+        # shellcheck source=/dev/null
+        source "${HOME}/.cargo/env"
+    fi
+    cargo install --locked --path "$DESCRY_SOURCE_DIR/crates/descry-cli"
+    echo ""
+    echo "  descry installed successfully."
+    echo ""
+    exit 0
+fi
+
 # Detect OS and arch
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)

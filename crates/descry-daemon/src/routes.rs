@@ -32,7 +32,11 @@ pub async fn pretooluse(body: Bytes) -> Response {
             Ok(decision) => {
                 let label = decision.decision.as_str();
                 increment_decision_counter(label);
-                info!(decision = label, risk = decision.risk_score.0, "pretooluse evaluated");
+                info!(
+                    decision = label,
+                    risk = decision.risk_score.0,
+                    "pretooluse evaluated"
+                );
                 Json(decision).into_response()
             }
             Err(error) => {
@@ -243,7 +247,10 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
     if a.len() != b.len() {
         return false;
     }
-    a.iter().zip(b.iter()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+    a.iter()
+        .zip(b.iter())
+        .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+        == 0
 }
 
 fn token_file_path() -> PathBuf {
