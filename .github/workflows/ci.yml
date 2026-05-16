@@ -35,7 +35,7 @@ jobs:
       - name: Installer source smoke
         env:
           CARGO_NET_OFFLINE: true
-        run: DESCRY_SOURCE_DIR="$PWD" CARGO_INSTALL_ROOT=/tmp/descry-cargo-root sh scripts/install.sh
+        run: DESCRY_SOURCE_DIR="$PWD" CARGO_INSTALL_ROOT=/tmp/descry-cargo-root bash scripts/install.sh
 
       - name: Smoke source-installed binary
         run: /tmp/descry-cargo-root/bin/descry --help
